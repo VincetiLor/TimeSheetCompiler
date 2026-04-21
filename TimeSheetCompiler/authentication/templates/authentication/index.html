@@ -1,0 +1,22 @@
+{% extends "index.html" %}
+
+{% block titolo %}Auth{% endblock %}
+
+{% block content %}
+    <div class="card-body absolute top-60 w-full max-w-md p-6 bg-white rounded-lg shadow-md"> 
+    <!-- <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Login</button>
+    </form> -->
+
+    <div id="g_id_onload"
+     data-client_id="90676593091-p9i165e4h7nf5o070tbgj0in0t7uf7mo.googleusercontent.com"
+     data-callback="handleCredentialResponse">
+    </div>
+    <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline">
+    </div>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    </div>
+{% endblock %}
