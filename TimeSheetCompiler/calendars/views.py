@@ -1,9 +1,8 @@
 from django.shortcuts import redirect, render 
 from django.views import View 
 from allauth.socialaccount.models import SocialApp, SocialToken
-from requests import get    
-from googleapiclient.discovery import build
 import requests
+from django.views.generic import ListView
 
 def get_token_valido(user):
     token = SocialToken.objects.get(account__user=user, account__provider='google')
@@ -31,19 +30,29 @@ def get_token_valido(user):
     return token.token
 # Create your views here
 
-def eventi_calendar(request):
-    try:
-        token = get_token_valido(request.user)
-    except:
-        return redirect('authentication:index')
+class SelectCalendarsView(ListView):
+    model = SocialToken
+    template_name = 'calendars/eventi_calendars.html'
+    context_object_name = 'calendars'
 
-    response = requests.get(
-        'https://www.googleapis.com/calendar/v3/users/me/calendarList',
-        headers = {'Authorization': f'Bearer {token}'},
-        params={'maxResults': 10}
-    )
+    def get_queryset(self):
+        try:
+            token = get_token_valido(self.request.user)
+        except:
+            return redirect('authentication:index')
 
-
-    calendar_list = response.json().get('items', ['no calendars found'])
-
-    return render(request, 'calendars/eventi_calendars.html', {'calendars': calendar_list})
+        response = requests.get(
+            'https://www.googleapis.com/calendar/v3/users/me/calendarList',
+            headers = {'Authorization': f'Bearer {token}'},
+            params={'maxResults': 10}
+        )
+        calendar_list = response.json().get('items', ['no calendars found'])
+        calendars = []
+        for calendar in calendar_list:
+            calendars.append(calendar['summary'])
+        #print(calendar_list)
+        return calendars
+    
+def event_compare(request):
+    return render(request, 'calendars/event_compare.html')
+    

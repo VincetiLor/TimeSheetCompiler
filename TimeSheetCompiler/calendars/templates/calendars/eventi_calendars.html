@@ -3,5 +3,94 @@
 {% block titolo %}Calendars{% endblock %}
 
 {% block content %}
+    <h2 class="text-xl font-bold mb-6 text-center mt-10">Ora puoi selezionare i calendari da cui classificare gli eventi</h2>
+
+    <form method="post" action="{% url 'event_compare' %}" class="flex flex-col gap-4 mt-4 gap-4 bg-gradient-to-r from-purple-600 to-blue-500 p-6 rounded-lg shadow-md">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <div id="select-calendars_1" class="flex flex-col gap-2 align-items items-center">
+        <label for="id_calendars">Seleziona Calendar:</label>
+        <select name="calendars_1" id="id_calendars_1"  class="select-calendars w-full p-2 border border-gray-200 rounded" onChange="updateOptions()">
+            {% for calendar in calendars %}
+                <option value= "{{calendar}}" class="">{{calendar}}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div id="select-calendars_2" class="flex flex-col gap-2 align-items items-center">
+        <label for="id_calendars">Seleziona Calendar:</label>
+        <select name="calendars_2" id="id_calendars_2"  class="select-calendars w-full p-2 border border-gray-200 rounded" onChange="updateOptions()">
+            {% for calendar in calendars %}
+                <option value= "{{calendar}}" class="">{{calendar}}</option>
+            {% endfor %}
+        </select>
+    </div>  
+
+    <div id="select-calendars_3" class="flex flex-col gap-2 align-items items-center">
+        <label for="id_calendars">Seleziona Calendar:</label>
+        <select name="calendars_3" id="id_calendars_3"  class="select-calendars w-full p-2 border border-gray-200 rounded" onChange="updateOptions()">
+            {% for calendar in calendars %}
+                <option value= "{{calendar}}" class="">{{calendar}}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+
+    <div class=" flex-row items-center align-items gap-2">
+        <label for="id_trigger">Trigger:</label>
+        <input name="trigger" class="rounded-lg bg-white  mt-4 ">
+    </div>
+
+    <div class="flex-row items-center align-items gap-2">
+        <label for="id_classificazione">Classificazione:</label>
+        <select name="classificazione" id="classificazione" class=" w-full p-2 border border-gray-200 rounded" onChange="updateCategoria()">
+            <option value="didattica">Didattica</option>
+            <option value="ricerca">Ricerca</option>
+            <option value="terza missione">Terza missione</option>
+            <option value="altro">Altro</option>
+        </select>
+
+
+        <div class="flex-row items-center align-items gap-2 hidden" id="classificazione_custom">
+            <label for="id_classificazione_custom">Specifica:</label>
+            <input name="classificazione custom" class="rounded-lg bg-white  mt-4">
+        </div>
+
+    </div>
     
+    </form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function updateOptions(){
+    selects = document.querySelectorAll('.select-calendars');
+
+    selectedValues = Array.from(selects)
+        .map(select => select.value);
+    
+    selects.forEach(select => {
+        const options = select.querySelectorAll('option');
+
+        options.forEach(option => {
+            if (selectedValues.includes(option.value) && option.value !== select.value) {
+                option.disabled = true;
+            } else {
+                option.disabled = false;
+            }
+        });
+    });
+}
+
+function updateCategoria(){
+    classificazione = document.getElementById('classificazione');
+    classificazione_custom = document.getElementById('classificazione_custom');
+
+    if (classificazione.value == 'altro'){
+        classificazione_custom.classList.remove('hidden');
+    } else {
+        classificazione_custom.classList.add('hidden');
+    }
+}
+</script>
 {% endblock %}
