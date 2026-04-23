@@ -54,5 +54,29 @@ class SelectCalendarsView(ListView):
         return calendars
     
 def event_compare(request):
+
+    if request.method == 'POST':
+        calendar_1 = request.POST.getlist('calendars_1')
+        calendar_2 = request.POST.getlist('calendars_2')
+        calendar_3 = request.POST.getlist('calendars_3')
+        print(calendar_1, calendar_2, calendar_3)
+
+        trigger_list = request.POST.getlist('trigger')
+        print(trigger_list)
+        classificazione_list = request.POST.getlist('classificazione')
+        print(classificazione_list)
+
+        trigger_classificazione = {}
+
+        for classificazione, trigger in zip(classificazione_list, trigger_list):
+            if classificazione == 'altro':
+                pass
+            trigger_classificazione[trigger] = classificazione
+
+
+
+
+
+
     return render(request, 'calendars/event_compare.html')
     
