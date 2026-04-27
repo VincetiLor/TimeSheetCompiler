@@ -47,15 +47,17 @@ class SelectCalendarsView(ListView):
             params={'maxResults': 10}
         )
         calendar_list = response.json().get('items', ['no calendars found'])
-        calendars = []
+        calendars = {}
         for calendar in calendar_list:
-            calendars.append(calendar['summary'])
-        #print(calendar_list)
+            calendars[calendar['summary']] = calendar['id']
+        
+        print(calendars)
         return calendars
     
 def event_compare(request):
 
     if request.method == 'POST':
+        print(request.POST)
         calendar_1 = request.POST.getlist('calendars_1')
         calendar_2 = request.POST.getlist('calendars_2')
         calendar_3 = request.POST.getlist('calendars_3')
@@ -72,10 +74,6 @@ def event_compare(request):
             if classificazione == 'altro':
                 pass
             trigger_classificazione[trigger] = classificazione
-
-
-
-
 
 
     return render(request, 'calendars/event_compare.html')
