@@ -1,4 +1,5 @@
 from django.shortcuts import redirect, render 
+from django.urls import reverse
 from django.views import View 
 from allauth.socialaccount.models import SocialApp, SocialToken
 import requests
@@ -35,11 +36,16 @@ class SelectCalendarsView(ListView):
     template_name = 'calendars/eventi_calendars.html'
     context_object_name = 'calendars'
 
-    def get_queryset(self):
+    def dispatch(self, request, *args, **kwargs):
         try:
             token = get_token_valido(self.request.user)
         except:
-            return redirect('authentication:index')
+             return redirect(f"{reverse('google_login')}?next={request.path}")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_queryset(self):
+        
+        token = get_token_valido(self.request.user)
 
         response = requests.get(
             'https://www.googleapis.com/calendar/v3/users/me/calendarList',

@@ -31,6 +31,7 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'classifyEvent.apps.ClassifyeventConfig',
     'calendars.apps.CalendarsConfig',
     'authentication.apps.AuthenticationConfig',
     'django.contrib.admin',
