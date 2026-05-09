@@ -3,12 +3,12 @@ from django.urls import reverse
 from django.views import View 
 from allauth.socialaccount.models import SocialApp, SocialToken
 import requests
-from django.views.generic import ListView
+from django.views.generic import TemplateView
 
 def get_token_valido(user):
     token = SocialToken.objects.get(account__user=user, account__provider='google')
     test = requests.get(
-        'https://www.googleapis.com/calendar.readonly',
+        'https://www.googleapis.com/calendar/v3/users/me/calendarList',
         headers={'Authorization': f'Bearer {token.token}'},
         params={'maxResults': 1}
     )
@@ -19,7 +19,7 @@ def get_token_valido(user):
             data={
                 'client_id': app.client_id,
                 'client_secret': app.secret,
-                'refresh_token': token.token,
+                'refresh_token': token.token_secret,
                 'grant_type': 'refresh_token',
             }
         )
@@ -31,20 +31,20 @@ def get_token_valido(user):
     return token.token
 # Create your views here
 
-class SelectCalendarsView(ListView):
+class SelectCalendarsView(TemplateView):
     model = SocialToken
     template_name = 'calendars/eventi_calendars.html'
     context_object_name = 'calendars'
 
     def dispatch(self, request, *args, **kwargs):
         try:
-            token = get_token_valido(self.request.user)
+            self.token = get_token_valido(self.request.user)
         except:
              return redirect(f"{reverse('google_login')}?next={request.path}")
         return super().dispatch(request, *args, **kwargs)
 
-    def get_queryset(self):
-        
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
         token = get_token_valido(self.request.user)
 
         response = requests.get(
@@ -52,14 +52,15 @@ class SelectCalendarsView(ListView):
             headers = {'Authorization': f'Bearer {token}'},
             params={'maxResults': 10}
         )
-        calendar_list = response.json().get('items', ['no calendars found'])
+        calendar_list = response.json().get('items', [])
         calendars = {}
         for calendar in calendar_list:
             calendars[calendar['summary']] = calendar['id']
         
         print(calendars)
-        return calendars
-    
+        context['calendars'] = calendars
+        return context
+
 def event_compare(request):
 
     if request.method == 'POST':
