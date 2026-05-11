@@ -53,16 +53,15 @@ INSTALLED_APPS = [
 
 SITE_ID = 1
 
-SOCIALACCOUNT_LOGIN_ON_GET = True
+SOCIALACCOUNT_AUTO_SIGNUP = True
 
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-# Dopo il login dove va l'utente
-LOGIN_REDIRECT_URL = '/calendars'
-LOGOUT_REDIRECT_URL = '/authentication'
+
+LOGOUT_REDIRECT_URL = '/auth/'
 
 
 MIDDLEWARE = [

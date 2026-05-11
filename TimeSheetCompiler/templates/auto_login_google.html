@@ -1,0 +1,13 @@
+{% load socialaccount %}
+<!DOCTYPE html>
+<html>
+<body>
+<form id="autoform" method="post" 
+      action="{% provider_login_url 'google' process='login' %}">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+</form>
+<script>document.getElementById('autoform').submit();</script>
+<p>Reindirizzamento a Google...</p>
+</body>
+</html>

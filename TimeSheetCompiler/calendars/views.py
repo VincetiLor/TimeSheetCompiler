@@ -29,7 +29,11 @@ def get_token_valido(user):
         else:
             raise Exception("Impossibile rinnovare il token")               
     return token.token
-# Create your views here
+
+
+def avvia_login_google(request):
+    next_url = request.GET.get('next', '/')
+    return render(request, 'auto_login_google.html', {'next': next_url})
 
 class SelectCalendarsView(TemplateView):
     model = SocialToken
@@ -40,16 +44,15 @@ class SelectCalendarsView(TemplateView):
         try:
             self.token = get_token_valido(self.request.user)
         except:
-             return redirect(f"{reverse('google_login')}?next={request.path}")
+             return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        token = get_token_valido(self.request.user)
 
         response = requests.get(
             'https://www.googleapis.com/calendar/v3/users/me/calendarList',
-            headers = {'Authorization': f'Bearer {token}'},
+            headers = {'Authorization': f'Bearer {self.token}'},
             params={'maxResults': 10}
         )
         calendar_list = response.json().get('items', [])
@@ -60,28 +63,13 @@ class SelectCalendarsView(TemplateView):
         print(calendars)
         context['calendars'] = calendars
         return context
+    
 
 def event_compare(request):
-
     if request.method == 'POST':
-        print(request.POST)
-        calendar_1 = request.POST.getlist('calendars_1')
-        calendar_2 = request.POST.getlist('calendars_2')
-        calendar_3 = request.POST.getlist('calendars_3')
-        print(calendar_1, calendar_2, calendar_3)
-
-        trigger_list = request.POST.getlist('trigger')
-        print(trigger_list)
-        classificazione_list = request.POST.getlist('classificazione')
-        print(classificazione_list)
-
-        trigger_classificazione = {}
-
-        for classificazione, trigger in zip(classificazione_list, trigger_list):
-            if classificazione == 'altro':
-                pass
-            trigger_classificazione[trigger] = classificazione
-
-
-    return render(request, 'calendars/event_compare.html')
-    
+        calendar_ids = request.POST.getlist('calendar_ids')
+        print(calendar_ids)
+        # Qui puoi aggiungere la logica per confrontare gli eventi dei calendari selezionati
+        return render(request, 'calendars/event_compare.html', {'calendar_ids': calendar_ids})
+    else:
+        return redirect('eventi_calendars') 
