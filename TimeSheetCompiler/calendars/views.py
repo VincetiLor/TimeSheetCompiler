@@ -67,7 +67,7 @@ class SelectCalendarsView(TemplateView):
 
 def event_compare(request):
     if request.method == 'POST':
-        calendar_ids = request.POST.getlist('calendar_ids')
+        calendar_ids = request.POST.getlist('calendars')
         print(calendar_ids)
         # Qui puoi aggiungere la logica per confrontare gli eventi dei calendari selezionati
         return render(request, 'calendars/event_compare.html', {'calendar_ids': calendar_ids})
