@@ -17,8 +17,8 @@ def avvia_login_google(request):
 class Hook_settings(UpdateView):
     model = Hook
     fields = ['config']
-    template_name = 'classifyEvents/settings.html'
-    success_url = '/classification'
+    template_name = 'hooks/settings.html'
+    success_url = '/hooks/'
 
     def get_object(self, queryset=None):
         hook, created = Hook.objects.get_or_create(

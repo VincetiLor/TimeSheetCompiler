@@ -31,7 +31,8 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
-    'classifyEvent.apps.ClassifyeventConfig',
+    'classificationpipeline.apps.ClassificationpipelineConfig',
+    'hooks.apps.HooksConfig',
     'calendars.apps.CalendarsConfig',
     'authentication.apps.AuthenticationConfig',
     'django.contrib.admin',

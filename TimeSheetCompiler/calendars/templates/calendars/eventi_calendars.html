@@ -5,14 +5,14 @@
 {% block content %}
     <h2 class="text-xl font-bold mb-6 text-center mt-10">Ora puoi selezionare i calendari da cui classificare gli eventi</h2>
 
-    <form method="post" id="container" action="{% url 'event_compare' %}" class="flex flex-col gap-4 mt-4 gap-4 bg-gradient-to-r from-purple-600 to-blue-500 p-6 rounded-lg shadow-md">
+    <form method="post" id="container" action="{% url 'classificationpipeline:event_compare' %}" class="flex flex-col gap-4 mt-4 gap-4 bg-gradient-to-r from-purple-600 to-blue-500 p-6 rounded-lg shadow-md">
     {% csrf_token %}
     {{ form.as_p }}
     <div id="select-calendars" class="flex flex-col gap-2 align-items items-center">
         <div class="cal-container">
             <label for="id_calendars">Seleziona Calendar:</label>
-            <select name="calendars" class="select-calendars w-full p-2 border border-gray-200 rounded" onChange="updateOptions()" required>
-                <option value="" disabled selected>Seleziona un calendario</option>
+            <select name="calendars" class="select-calendars w-full p-2 border border-gray-200 rounded" onChange="updateOptions()">
+                <option value="">Seleziona calendario</option>
                 {% for calendar, id in calendars.items %}   
                 <option value= "{{id}}" class="">{{calendar}}</option>
                 {% endfor %}
@@ -34,34 +34,45 @@
 {% block extra_js %}
 <script>
 
+document.getElementById('container').addEventListener('submit', function(e) {
+    const selects = document.querySelectorAll('.select-calendars');
+    for (const select of selects) {
+        if (select.value === '') {
+            e.preventDefault();
+            alert('Seleziona un calendario per ogni riga prima di procedere.');
+            return;
+        }
+    }
+});
+
 function addCalendar(){
-    var original = document.getElementById('select-calendars');
-    var clone = original.cloneNode(true);
-    clone.removeAttribute('id');
-    clone.classList.add('added-calendar');
-    clone.querySelector('select').selectedIndex = 0;
+    var container = document.getElementById('select-calendars');
+
+    var clone = container.cloneNode(true);
+    clone.querySelector('select').value = "";
     document.getElementById('add-calendar').insertAdjacentElement('beforebegin', clone);
 }
 
 function removeCalendar(){
-    var added = document.querySelectorAll('.added-calendar');
-    if (added.length > 0) {
-        added[added.length - 1].remove();
+    var container = document.getElementById('select-calendars');
+    var clones = document.querySelectorAll('#select-calendars ~ #select-calendars');
+
+    if (clones.length > 0) {
+        clones[clones.length - 1].remove();
         updateOptions();
     }
 }
 
 function updateOptions(){
-    const selects = document.querySelectorAll('.select-calendars');
+   const selects = document.querySelectorAll('.select-calendars');
 
     const selectedValues = Array.from(selects)
         .map(select => select.value);
-
+    
     selects.forEach(select => {
         const options = select.querySelectorAll('option');
 
         options.forEach(option => {
-            if (option.value === "") return;
             if (selectedValues.includes(option.value) && option.value !== select.value) {
                 option.disabled = true;
             } else {
