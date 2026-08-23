@@ -62,6 +62,8 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 
+LOGIN_URL = '/auth/'
+LOGIN_REDIRECT_URL = '/auth/'
 LOGOUT_REDIRECT_URL = '/auth/'
 
 

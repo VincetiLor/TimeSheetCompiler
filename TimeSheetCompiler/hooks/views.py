@@ -1,20 +1,9 @@
-
-from django.shortcuts import render
-from django.shortcuts import redirect
-from django.urls import reverse
-from allauth.socialaccount.models import SocialApp, SocialToken
-import requests
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views.generic import UpdateView
 from .models import Hook
-from calendars.views import get_token_valido
-# Create your views here.
 
 
-def avvia_login_google(request):
-    next_url = request.GET.get('next', '/')
-    return render(request, 'auto_login_google.html', {'next': next_url})
-
-class Hook_settings(UpdateView):
+class Hook_settings(LoginRequiredMixin, UpdateView):
     model = Hook
     fields = ['config']
     template_name = 'hooks/settings.html'
@@ -24,11 +13,3 @@ class Hook_settings(UpdateView):
         hook, created = Hook.objects.get_or_create(
             docente=self.request.user.docente)
         return hook
-
-
-    def dispatch(self, request, *args, **kwargs):
-        try:
-            get_token_valido(request.user)
-        except:
-            return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
-        return super().dispatch(request, *args, **kwargs)

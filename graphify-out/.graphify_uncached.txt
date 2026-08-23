@@ -1,0 +1,7 @@
+/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/templates/authentication/index.html
+/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/templates/calendars/eventi_calendars.html
+/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/templates/classificationpipeline/event_compare.html
+/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/templates/hooks/settings.html
+/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/requirements.txt
+/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/templates/auto_login_google.html
+/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/templates/index.html
