@@ -270,6 +270,186 @@ class Hook(models.Model):
 
 ---
 
+## Migrazione da SQLite a PostgreSQL
+
+**Cosa**: il database di sviluppo e' passato da SQLite (file `db.sqlite3` nella
+root del progetto) a PostgreSQL 17 in container Docker, con le credenziali lette
+da variabili d'ambiente invece che hardcoded.
+
+**Perche'**: SQLite serializza le scritture con un lock a livello di file. Con i
+1000-3000 docenti previsti a regime (§2.2 di `CLAUDE.md`) la classificazione
+degli eventi genera scritture concorrenti che SQLite non regge. Postgres
+introduce inoltre due capacita' che servono a questo progetto in particolare:
+gli indici parziali (per isolare il sottoinsieme di `Event` in stato attivo dallo
+storico) e il tipo `jsonb` nativo, che rende interrogabili i campi
+`Hook.config` e `Calendar.event` con lookup come `__has_key` e `__contains` —
+non supportati dal backend SQLite.
+
+**Come**: `dumpdata` su SQLite, `migrate` su Postgres vuoto, `loaddata`. Il
+percorso passa interamente dall'ORM, quindi lo schema risultante e' quello
+descritto dalle migrazioni Django.
+
+**Alternative scartate**:
+
+1. *Restare su SQLite con WAL mode.* Il write-ahead logging migliora la
+   concorrenza in lettura ma le scritture restano serializzate: sposta il
+   problema, non lo risolve, e va comunque rifatto al primo picco di carico.
+2. *pgloader / conversione diretta del file SQLite.* Copia le tabelle bypassando
+   Django e mappa i tipi con regole proprie: si ottiene un database che non
+   corrisponde allo stato di `django_migrations`, con divergenze che emergono
+   alla prima `makemigrations`. Scartata perche' il costo della coerenza si paga
+   comunque, solo piu' tardi e peggio.
+3. *MySQL/MariaDB.* Nessun vantaggio per questo caso d'uso e supporto `jsonb`
+   inferiore; Postgres e' anche il default di fatto nell'ecosistema Django.
+
+**Configurazione risultante**:
+```python
+# mysite/settings.py
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / os.environ.get('DJANGO_ENV_FILE', '.env.dev'))
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('DB_NAME', 'timesheet'),
+        'USER': os.environ.get('DB_USER', 'timesheet'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+        'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
+    }
+}
+```
+
+`load_dotenv` non sovrascrive le variabili gia' presenti in ambiente: in
+produzione il file `.env.dev` non esiste e comandano le variabili iniettate dal
+container, quindi lo stesso `settings.py` vale in entrambi gli ambienti. La
+scelta di `python-dotenv` al posto del `source` manuale di un env file e' pura
+ergonomia di sviluppo — evita che una shell senza variabili esportate produca un
+errore di autenticazione fuorviante.
+
+**Driver**: `psycopg[binary]` (psycopg 3), non psycopg2. E' il driver
+raccomandato da Django 6; l'extra `binary` include libpq precompilata, evitando
+la dipendenza di sistema `libpq-dev` sulle macchine di sviluppo.
+
+**File**: `mysite/settings.py`, `requirements.txt`, `.env.example`, `.gitignore`
+
+---
+
+## Trappole incontrate nella migrazione dei dati (e come sono state risolte)
+
+Tre problemi concreti emersi eseguendo `dumpdata`/`loaddata`, annotati perche'
+si ripresenteranno identici a chi rifara' la procedura su un altro ambiente.
+
+**1. Content type e permessi vanno esclusi dal dump.** `migrate` ricrea da se' le
+righe di `django_content_type` e `auth_permission` sul database nuovo; caricare
+anche quelle serializzate viola il vincolo di unicita' e fa fallire `loaddata`.
+I flag di chiave naturale servono invece a far risolvere i legami
+utente-gruppo-permesso per nome anziche' per PK intera, che sul database nuovo
+e' diversa:
+
+```bash
+python manage.py dumpdata \
+  --natural-foreign --natural-primary \
+  --exclude contenttypes --exclude auth.permission \
+  --exclude admin.logentry --exclude sessions.session \
+  --indent 2 -o dump.json
+```
+
+**2. `--natural-primary` fa perdere l'identita' di `Site`, e questo rompe
+allauth.** Poiche' le PK non vengono serializzate, il `Site` del progetto e'
+rientrato come `pk=2`, mentre `example.com` creato da `migrate` ha occupato
+`pk=1`. Con `SITE_ID = 1` allauth cercava la `SocialApp` sul sito sbagliato e il
+login Google diventava irrisolvibile, pur essendo le credenziali correttamente
+migrate. Risolto consolidando il sito reale su `pk=1` e rilegandoci la
+`SocialApp` (`fix_site.py`). Da rifare a ogni nuovo ambiente, oppure evitare
+alla radice escludendo `sites` dal dump e riconfigurando il sito a mano.
+
+**3. Le sessioni non sopravvivono (per scelta).** `sessions.session` e' escluso
+dal dump, quindi dopo la migrazione tutti gli utenti risultano disconnessi. E'
+il comportamento voluto — le sessioni sono dati effimeri legati a cookie — ma
+produce un sintomo confondente: si rientra come utente diverso da prima e le
+view che assumono un `Docente` collegato falliscono (vedi la voce successiva).
+
+**File**: `dump_step2.sh`, `docker_step3.sh`, `fix_site.py`
+
+---
+
+## Conseguenze semantiche del cambio di backend sul codice futuro
+
+Postgres non e' un SQLite piu' grande: alcuni comportamenti su cui il codice
+poteva implicitamente contare cambiano. Nessuno di questi rompe il codice
+attuale — l'app non fa quasi query locali (§18 di `CLAUDE.md`) — ma tutti
+diventano rilevanti quando si scrivera' la pipeline di ingestione eventi.
+
+- **`LIKE` diventa case-sensitive.** Su SQLite `__contains` ignora il case per
+  l'ASCII, su Postgres no. Un filtro scritto e testato su SQLite restituisce
+  silenziosamente meno righe. Usare `__icontains`/`__iexact` quando l'intento e'
+  l'insensibilita' al case.
+- **Nessun ordinamento implicito.** Nessun modello del progetto definisce
+  `Meta.ordering`: i queryset non ordinati cambiano ordine di riga, e i NULL
+  finiscono in coda in ordinamento ascendente anziche' in testa.
+- **Una query fallita aborta l'intera transazione.** Dentro un blocco `atomic()`,
+  Postgres rifiuta ogni query successiva a un errore finche' non si esegue il
+  rollback. Il pattern `try: create() except IntegrityError: pass` — plausibile
+  per la deduplicazione degli eventi richiesta al §154 di `CLAUDE.md` — non
+  funziona: servono `get_or_create` o `bulk_create(ignore_conflicts=True)`, che
+  delegano il conflitto al database invece di lasciarlo emergere come eccezione.
+- **`JSONField` diventa `jsonb` reale.** L'API Python e' identica (si legge e si
+  scrive un `dict`), ma lo storage e' parsato: chiavi duplicate collassate,
+  ordine delle chiavi non conservato, JSON malformato rifiutato. In cambio si
+  ottengono lookup e indici GIN sul contenuto.
+- **Il database e' ora un servizio.** Deve essere in esecuzione perche'
+  `manage.py` faccia qualsiasi cosa, e il backup non e' piu' la copia di un file
+  ma `pg_dump`.
+
+**File**: nessuno modificato — vincoli da rispettare nel codice futuro
+
+---
+
+## Bug latenti resi visibili dalla migrazione
+
+Non causati dal cambio di database, ma emersi perche' la perdita delle sessioni
+ha fatto rientrare con un utente diverso (il superuser dell'admin, privo di
+`Docente` collegato).
+
+`hooks/views.py` accede a `self.request.user.docente` senza difese: per
+qualunque utente autenticato ma privo di `Docente` — un superuser creato con
+`createsuperuser`, o un utente creato dall'admin — la view solleva
+`RelatedObjectDoesNotExist` e restituisce un 500 invece di un messaggio
+comprensibile.
+
+```python
+# hooks/views.py
+def get_object(self, queryset=None):
+    hook, created = Hook.objects.get_or_create(
+        docente=self.request.user.docente)
+    return hook
+```
+
+`calendars/views.py` ha lo stesso problema mascherato da un `except:` nudo, che
+riconduce cause diverse (utente senza account Google, token scaduto, rete
+irraggiungibile) allo stesso redirect silenzioso verso `avvia_login_google`,
+rendendo indistinguibile un problema di configurazione da uno di connettivita'.
+
+```python
+# calendars/views.py
+def dispatch(self, request, *args, **kwargs):
+    try:
+        self.token = get_token_valido(self.request.user)
+    except:
+         return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
+    return super().dispatch(request, *args, **kwargs)
+```
+
+Entrambi gia' segnalati in `DEPLOY_CHECKLIST.md`; qui si registra solo che la
+migrazione ne ha reso concreto l'impatto.
+
+**File**: `hooks/views.py`, `calendars/views.py`
+
+---
+
 ## (In sospeso) React/Tailwind per il frontend
 
 Discusso ma **non implementato**: Tailwind è già in uso (via CDN) e ritenuto
