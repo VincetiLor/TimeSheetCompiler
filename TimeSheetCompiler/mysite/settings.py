@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -73,10 +74,31 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'authentication.middleware.ShibbolethAuthMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'allauth.account.middleware.AccountMiddleware',
 ]
+
+
+# Shibboleth pre-auth (container SP injects these as request headers before
+# the request reaches Django). Header names are a guess pending the real
+# attribute-map from the SP config - update here, not in the middleware code.
+SHIBBOLETH_HEADER_MAP = {
+    'nome': 'HTTP_SHIB_GIVENNAME',
+    'cognome': 'HTTP_SHIB_SN',
+    'id_unimore': 'HTTP_SHIB_UNIQUE_ID',
+}
+
+# Dev-only bypass: when the Shib container isn't running locally, fake the
+# headers it would have injected. Hard-gated behind DEBUG so this can never
+# fire in production even if the env var is left set by mistake.
+SHIBBOLETH_DEV_MODE = DEBUG and os.environ.get('SHIBBOLETH_DEV_MODE') == 'True'
+SHIBBOLETH_DEV_FAKE_HEADERS = {
+    'HTTP_SHIB_GIVENNAME': os.environ.get('SHIBBOLETH_DEV_NOME', 'Mario'),
+    'HTTP_SHIB_SN': os.environ.get('SHIBBOLETH_DEV_COGNOME', 'Rossi'),
+    'HTTP_SHIB_UNIQUE_ID': os.environ.get('SHIBBOLETH_DEV_ID', '1'),
+}
 
 ROOT_URLCONF = 'mysite.urls'
 
