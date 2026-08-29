@@ -12,6 +12,6 @@ CLAUDE.md
 .env.*
 !.env.example
 dump.json
-
+.vscode
 # Log delle run schedulate (cron)
 TimeSheetCompiler/logs/
