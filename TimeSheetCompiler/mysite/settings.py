@@ -168,7 +168,12 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# Non e' una preferenza di visualizzazione: la regola di scadenza degli eventi
+# (giorno 8 del mese successivo, vedi DECISIONS.md) e' una data di calendario
+# calcolata con timezone.localtime(). Con TIME_ZONE = 'UTC' il confine di
+# mezzanotte sarebbe sfasato di 1-2 ore rispetto all'Italia e un evento
+# dell'1/08 alle 00:30 ora italiana risulterebbe del 31/07.
+TIME_ZONE = 'Europe/Rome'
 
 USE_I18N = True
 

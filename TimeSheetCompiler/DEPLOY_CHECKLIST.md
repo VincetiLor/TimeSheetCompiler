@@ -70,6 +70,58 @@ Aggiornare questo file ogni volta che si introduce una nuova scorciatoia dev-onl
 - HTTPS/TLS davanti all'app (nessuna configurazione presente)
 - CI/CD, health check, logging centralizzato (oggi solo `print()` sparsi, nessun `logging`)
 - Gestione segreti (env file / secret manager) — oggi nessun meccanismo, tutto a mano
+- ~~**Scheduler per `mark_passed_events`**~~ — **risolto** (2026-08-29): cron
+  utente con schedule `0 3 8-12 * *`, installato da `install_cron_step4.sh`, che
+  invoca il wrapper `cron_mark_passed_events.sh` (fissa `.venv/bin/python` e i
+  percorsi, redirige su `logs/mark_passed_events.log`). Cinque run dopo il
+  confine di scadenza del giorno 8 danno ridondanza contro il downtime senza le
+  20+ run mensili inutili di una cadenza giornaliera — vedi `DECISIONS.md`.
+  **Da rifare sul server di produzione**: la crontab e' per utente e per
+  macchina, non vive nel repo. Sul server verificare (a) che l'utente che lancia
+  lo script abbia accesso al database e al file `.env` di produzione, (b) che il
+  percorso del virtualenv coincida con quello di deploy, (c) che il fuso del
+  sistema operativo non sposti il giorno rispetto a `TIME_ZONE` di Django, e (d)
+  che i log abbiano una rotazione (`logrotate`) o crescano indefinitamente.
+  Prima di attivarlo lanciarlo una volta con `--dry-run` e guardare il numero.
+- ~~**`TIME_ZONE = 'UTC'` sfasa il cutoff di `mark_passed_events`**~~ —
+  **risolto** (2026-08-26): `TIME_ZONE = 'Europe/Rome'` in `mysite/settings.py`.
+  Resta da verificare al deploy che il **fuso del sistema operativo** del server
+  non contraddica quello di Django: `USE_TZ = True` fa salvare tutto in UTC nel
+  database, quindi Django e' coerente da solo, ma l'orario con cui cron decide
+  quando lanciare `mark_passed_events` viene dal sistema, non da Django.
+
+
+## Test
+
+- **La suite gira contro Postgres reale.** `manage.py test` crea e distrugge
+  `test_timesheet`: il ruolo DB usato dall'applicazione deve avere il permesso
+  `CREATEDB` (in dev il ruolo `timesheet` ce l'ha gia'). In CI, quando ci sara',
+  serve un servizio Postgres, non SQLite: la suite non e' stata verificata su
+  altri backend.
+- **Test che documentano bug aperti.** I test con suffisso `_known_bug` /
+  `_known_gap` asseriscono il comportamento sbagliato attuale. Quando il bug
+  corrispondente viene corretto **il test fallisce di proposito**: va
+  aggiornato, non cancellato. Elenco: `Hook_settings` senza `Docente`,
+  `LoginRequiredMixin` mancante su `SelectCalendarsView`, `event_compare`
+  raggiungibile da anonimo, nessuna validazione di schema su `Hook.config`,
+  nessun enforcement delle transizioni di `Event.status` (una stringa
+  arbitraria e un passo all'indietro `compilato -> incerto` passano entrambi).
+  Il vincolo di unicita' su `(calendar, event_id)` era in questo elenco: e'
+  stato aggiunto il 2026-08-26 e il test relativo e' gia' stato riscritto.
+- **`SHIBBOLETH_DEV_MODE` e' valutato all'import di `settings.py`**
+  (`DEBUG and os.environ.get(...)`): impostare la variabile d'ambiente a runtime
+  non ha effetto, ne' nei test ne' in produzione. Di conseguenza il "gate su
+  DEBUG" e' piu' debole di quanto sembri — dipende solo dal valore di `DEBUG` al
+  momento dell'avvio del processo. Verificare a mano, prima del deploy, che in
+  produzione risulti `False`.
+- **In dev-mode gli header finti vincono su quelli reali parziali.**
+  `_read_headers` fonde come `{**meta, **FAKE}`: se anche un solo header Shib
+  manca, l'intera identita' diventa quella finta. Con un SP configurato a meta'
+  tutti gli utenti entrerebbero come lo stesso docente. Comportamento pinnato da
+  un test; da rivedere quando il container SP viene integrato davvero.
+- **CI assente.** La suite oggi si lancia solo a mano
+  (`../.venv/bin/python manage.py test`). Da agganciare a una GitHub Action
+  insieme al linter quando la CI verra' introdotta.
 
 ---
 

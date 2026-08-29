@@ -460,3 +460,625 @@ gestita oggi con JS vanilla) e la futura UI di revisione classificazione LLM
 deciderà di procedere: "isola" React montata su un solo template via bundle
 separato (Vite), resto del sito resta Django template puro — nessuna riscrittura
 totale a SPA. Nessun codice scritto per questo punto.
+
+---
+
+## Test automatici: test runner Django + `unittest.mock`, niente pytest
+
+**Data**: 2026-08-26
+
+**Decisione**: la suite di test vive nei `tests.py` di ciascuna app e gira con
+`python manage.py test`. Le dipendenze di rete verso Google vengono sostituite
+con `unittest.mock.patch`. Nessuna nuova dipendenza aggiunta a
+`requirements.txt` (niente `pytest`, `pytest-django`, `responses`,
+`factory_boy`).
+
+**Alternative scartate**:
+
+- **`pytest` + `pytest-django`**: sintassi delle fixture piu' ergonomica e
+  output piu' leggibile, ma introduce due dipendenze e un file di
+  configurazione per un progetto che non ha ancora ne' CI ne' linter. Il
+  runner integrato copre gia' il 100% di quello che serve qui (client HTTP,
+  transazioni per test, `override_settings`).
+- **`responses` / `requests-mock`** per le chiamate HTTP: sostituibili da
+  `mock.patch` sul modulo che effettua la chiamata, senza aggiungere librerie.
+  Il punto chiave e' *dove* si applica la patch: sul simbolo come e' importato
+  dal modulo sotto test, non dove e' definito.
+
+```python
+# authentication/tests.py — Google non viene mai contattato davvero
+@mock.patch('authentication.services.requests.post')
+@mock.patch('authentication.services.requests.get')
+def test_expired_token_is_refreshed_and_persisted(self, mock_get, mock_post):
+    mock_get.return_value = self._response(401)
+    mock_post.return_value = self._response(200, {'access_token': 'access-new'})
+
+    self.assertEqual(get_token_valido(self.user), 'access-new')
+
+    self.token.refresh_from_db()
+    self.assertEqual(self.token.token, 'access-new')
+```
+
+**Cosa si e' scelto di NON testare**: l'handshake OAuth di Google (codice di
+`allauth` piu' un server esterno — testarlo significherebbe testare librerie di
+terzi) e il container Shibboleth. Quest'ultimo e' irrilevante ai fini del test:
+il suo unico compito e' iniettare header nella richiesta, e il test client di
+Django li inietta direttamente. La suite del middleware gira quindi senza
+container, con `SHIBBOLETH_DEV_MODE=False` forzato via `override_settings` per
+non dipendere dall'ambiente.
+
+```python
+# authentication/tests.py — il container SP non serve, bastano gli header
+def test_provisions_user_and_docente_on_first_hit(self):
+    response = self.client.get('/auth/', headers=SHIB_HEADERS)
+
+    docente = Docente.objects.get(id_unimore=4242)
+    self.assertEqual(docente.user.username, 'shib-4242')
+```
+
+**Bug noti come test verdi, non come test rossi**: i difetti gia' censiti in
+`CLAUDE.md` §4 (crash di `Hook_settings` senza `Docente`, `LoginRequiredMixin`
+mancante su `SelectCalendarsView`, assenza di chiave di deduplicazione degli
+eventi) sono coperti da test che asseriscono il comportamento *attuale*, con
+nome e docstring che lo dichiarano esplicitamente (`..._known_bug`,
+`..._known_gap`). Alternativa scartata: `@unittest.expectedFailure`, che
+nasconde le regressioni nella direzione opposta. Cosi' invece la suite resta
+verde, e quando qualcuno corregge il bug il test fallisce e va aggiornato:
+il fallimento e' il promemoria.
+
+### Test significativi, per esteso
+
+Quattro test che valgono la pena di essere citati per l'elaborato, perche'
+ciascuno documenta un comportamento non ovvio del software piu' che una
+funzione banale.
+
+**1. Il middleware Shibboleth si testa senza container.** E' il punto che
+sembrava piu' ostico: il provisioning dipende da un SP esterno che in sviluppo
+non gira. Ma il container ha un solo compito osservabile — mettere attributi
+negli header della richiesta — e il test client di Django puo' fare esattamente
+la stessa cosa. Il test passa dallo stack reale (`/auth/`, non `RequestFactory`)
+perche' `django_login` ha bisogno di una sessione vera:
+
+```python
+# authentication/tests.py
+SHIB_HEADERS = {
+    'shib-givenname': 'Mario',
+    'shib-sn': 'Rossi',
+    'shib-unique-id': '4242',
+}
+
+def test_provisions_user_and_docente_on_first_hit(self):
+    response = self.client.get('/auth/', headers=SHIB_HEADERS)
+
+    self.assertEqual(response.status_code, 200)
+    docente = Docente.objects.get(id_unimore=4242)
+    self.assertEqual(docente.nome, 'Mario')
+    self.assertEqual(docente.user.username, 'shib-4242')
+    self.assertTrue(response.wsgi_request.user.is_authenticated)
+```
+
+**2. In dev-mode gli header finti battono quelli reali parziali.** Difetto
+emerso proprio scrivendo i test. `_read_headers` fonde i due dizionari come
+`{**meta, **FAKE}`: se anche un solo header Shib manca, i valori finti vincono
+sull'intera identita', non solo sul campo mancante. Con un SP configurato a
+meta' ogni utente entrerebbe come lo stesso docente fittizio. Il test asserisce
+il comportamento attuale, in modo che l'ordine della fusione non possa cambiare
+inosservato:
+
+```python
+# authentication/tests.py
+def test_dev_headers_override_partially_present_real_headers(self):
+    self.client.get('/auth/', headers={'shib-unique-id': '999'})
+
+    self.assertFalse(Docente.objects.filter(id_unimore=999).exists())
+    self.assertTrue(Docente.objects.filter(id_unimore=1).exists())
+```
+
+**3. Il JSON degli hook non ha alcuna validazione di schema.** `Hook_settings`
+espone il `JSONField` grezzo tramite `fields = ['config']`: il form accetta
+qualunque JSON sintatticamente valido, scalari compresi. `default=dict` sul
+modello non e' un vincolo, e' solo un valore iniziale. Il test lo dimostra
+salvando un intero come configurazione degli hook:
+
+```python
+# hooks/tests.py
+def test_any_valid_json_scalar_is_accepted_known_gap(self):
+    self.client.force_login(self.user)
+
+    response = self.client.post('/hooks/', {'config': '42'})
+
+    self.assertEqual(response.status_code, 302)
+    self.assertEqual(Hook.objects.get(docente=self.docente).config, 42)
+```
+
+Non e' stato aggiunto un validatore: sarebbe una feature, non un test. Il test
+serve a rendere esplicito che la validazione oggi non esiste, cosi' che venga
+progettata insieme alla pipeline di classificazione (che di quel JSON e' l'unico
+consumatore).
+
+**4. La pipeline non persiste niente — e il test lo dice.** La POST che
+dovrebbe avviare la classificazione non scrive una riga. Il test asserisce zero
+righe: fallira' non appena l'ingestione verra' implementata, ed e' quello il
+momento in cui va sostituito con asserzioni vere sulle righe create.
+
+```python
+# classificationpipeline/tests.py
+def test_no_calendar_or_event_row_is_persisted_yet_known_gap(self):
+    self.client.force_login(self.user)
+
+    self.client.post('/events/', {'calendars': ['cal-a@google.com']})
+
+    self.assertEqual(Calendar.objects.count(), 0)
+    self.assertEqual(Event.objects.count(), 0)
+```
+
+### Isolamento dall'ambiente locale
+
+`SHIBBOLETH_DEV_MODE` viene calcolato all'import di `settings.py`, quindi il suo
+valore dipende dal `.env.dev` del singolo sviluppatore — file non versionato.
+Senza precauzioni la suite passava o falliva a seconda della macchina: con il
+flag attivo il middleware autenticava anche il client "anonimo", e i test che
+verificano i redirect di accesso negato fallivano. Tutte le classi di test che
+asseriscono comportamento anonimo forzano quindi il flag:
+
+```python
+# hooks/tests.py
+@override_settings(SHIBBOLETH_DEV_MODE=False)
+class HookSettingsTests(TestCase):
+```
+
+Regola generale che ne discende: un test che asserisce il comportamento di una
+view rispetto all'autenticazione deve fissare esplicitamente lo stato del
+middleware, altrimenti non sta testando la view.
+
+**File**: `authentication/tests.py`, `hooks/tests.py`, `calendars/tests.py`,
+`classificationpipeline/tests.py`
+
+---
+
+## Provisioning automatico di `Hook` via signal `post_save` su `Docente`
+
+Fino a questo punto la riga `Hook` di un docente veniva creata pigramente, alla
+prima visita di `/hooks/`, dal `get_or_create` dentro `Hook_settings.get_object`.
+Funziona, ma sposta un fatto di dominio ("ogni docente ha esattamente una
+configurazione di hook") dentro una view: qualunque altro consumatore futuro
+della configurazione — la pipeline di classificazione, un management command, un
+job schedulato — deve o ripetere il `get_or_create` o gestire il caso "hook
+assente". Con la relazione dichiarata `OneToOneField`, "assente" è uno stato che
+lo schema promette non esistere e che invece esiste davvero.
+
+La creazione è stata quindi agganciata a un signal `post_save` sul modello
+`Docente`, registrato in `AuthenticationConfig.ready()`:
+
+```python
+# authentication/signals.py
+@receiver(post_save, sender=Docente)
+def create_hook_for_docente(sender, instance, created, **kwargs):
+    if created:
+        Hook.objects.get_or_create(docente=instance)
+```
+
+```python
+# authentication/apps.py
+class AuthenticationConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'authentication'
+
+    def ready(self):
+        from . import signals  # noqa: F401
+```
+
+L'import dentro `ready()` non è stilistico: importare `signals` a livello di
+modulo in `apps.py` significherebbe importare i modelli prima che il registry
+delle app sia popolato (`AppRegistryNotReady`).
+
+`get_or_create` invece di `create` mantiene il receiver idempotente rispetto a
+un provisioning bulk che creasse `Docente` e `Hook` nella stessa transazione.
+
+Non basta però per `loaddata`. Se il fixture contiene sia `authentication.Docente`
+sia `hooks.Hook` e i `Docente` vengono caricati per primi, il signal crea un
+`Hook` con una PK nuova presa dalla sequenza, e subito dopo `loaddata` inserisce
+il `Hook` dumpato con lo stesso `docente_id`: violazione del vincolo di unicità
+della OneToOne. Il round-trip `dumpdata`/`loaddata` è un percorso reale in questo
+progetto (è stato usato per la migrazione a Postgres), quindi il receiver ignora
+esplicitamente i salvataggi in modalità `raw`, che è come Django segnala
+"questo save viene da un fixture":
+
+```python
+def create_hook_for_docente(sender, instance, created, raw=False, **kwargs):
+    if raw or not created:
+        return
+    Hook.objects.get_or_create(docente=instance)
+```
+
+**Alternative scartate**
+
+- *Lasciare il `get_or_create` nella view*. È lo stato precedente: il
+  `get_or_create` in `Hook_settings` è stato **mantenuto** come rete di sicurezza
+  per i `Docente` creati prima di questo cambiamento, ma non è più l'unico punto
+  di creazione.
+- *Override di `Docente.save()`*. Accoppia il modello `authentication` all'app
+  `hooks` in modo diretto e rende `Docente` non testabile in isolamento; il
+  signal lascia la dipendenza a senso unico e disattivabile.
+- *`Hook` creato dal `ShibbolethAuthMiddleware`*, accanto al `Docente`. Copre
+  solo il percorso Shibboleth, non `createsuperuser` + creazione manuale, non i
+  test, non i fixture.
+
+**Effetto sui test**: tre test in `hooks/tests.py` assumevano che nessun `Hook`
+esistesse dopo la creazione di un `Docente` e lo creavano a mano. Sono stati
+riscritti per aggiornare la riga già esistente. Il test
+`test_anonymous_is_redirected_to_login` ora asserisce che la richiesta anonima
+lasci la config *intatta*, non che l'hook non esista.
+
+**File**: `authentication/signals.py`, `authentication/apps.py`, `hooks/tests.py`
+
+---
+
+## Vincoli di unicità su `Calendar` ed `Event` (chiave di deduplicazione)
+
+`classificationpipeline/models.py` dichiarava i vincoli con una sintassi che non
+è Python valido come vincolo — un assegnamento a un attributo dentro un letterale
+di lista:
+
+```python
+# PRIMA - non fa quello che sembra
+class Meta:
+    constraints = [
+        models.UniqueConstraint = (fields['docente', 'calendar_id'], name='...'),
+    ]
+```
+
+Il risultato non era un errore silenzioso ma un `SyntaxError` all'import del
+modulo: l'app non partiva affatto. La forma corretta è una chiamata al
+costruttore, con `fields` come argomento keyword:
+
+```python
+# DOPO
+class Meta:
+    constraints = [
+        models.UniqueConstraint(
+            fields=['docente', 'calendar_id'],
+            name='unique_calendar_to_professor',
+        ),
+    ]
+```
+
+Il vincolo su `Event` è analogo, su `('calendar', 'event_id')`.
+
+Al di là della sintassi, i due vincoli sono la prima metà concreta della
+**deduplicazione in classificazione** descritta in `CLAUDE.md` §2.4: la chiave
+naturale di un evento è la coppia (calendario locale, id evento Google), non
+l'id Google da solo — lo stesso evento può comparire in due calendari diversi e
+lì è legittimamente due righe. Analogamente, un docente non può selezionare due
+volte lo stesso Google Calendar. Il vincolo vive nel database, quindi vale anche
+per i percorsi che non passano dall'ORM applicativo (import, script, job).
+
+Migrazione generata: `classificationpipeline/0003_calendar_unique_calendar_to_professor_and_more.py`.
+
+**Effetto sui test**: `test_duplicate_event_id_is_currently_allowed_known_gap`
+asseriva il comportamento sbagliato precedente (due righe duplicate consentite).
+Come previsto dalla convenzione `_known_gap`, chiudere il gap lo fa fallire: è
+stato sostituito da tre test che verificano il rifiuto del duplicato nello stesso
+calendario, l'accettazione dello stesso `event_id` in calendari diversi, e il
+rifiuto del calendario duplicato per lo stesso docente.
+
+**File**: `classificationpipeline/models.py`, `classificationpipeline/tests.py`
+
+---
+
+## Ciclo di vita dell'evento: campo `status` e indice parziale
+
+`Event` non aveva alcuna nozione di avanzamento: una riga in tabella significava
+solo "questo evento esiste", non "questo evento è stato compilato". Senza quel
+dato nessuna delle due deduplicazioni della specifica è esprimibile — quella in
+compilazione ha bisogno di sapere *quali* eventi Selenium ha già inserito — e
+nessun evento può essere congelato quando il suo periodo di validità scade.
+
+Il campo è una `TextChoices` con i quattro stati di `CLAUDE.md` §2.3:
+
+```python
+class Event(models.Model):
+
+    class Status(models.TextChoices):
+        INCERTO = 'incerto', 'Incerto'
+        CLASSIFICATO = 'classificato', 'Classificato'
+        COMPILATO = 'compilato', 'Compilato'
+        PASSATO = 'passato', 'Passato'
+
+    ACTIVE_STATUSES = (Status.INCERTO, Status.CLASSIFICATO)
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.INCERTO,
+    )
+```
+
+Tre scelte da motivare.
+
+**`CharField` con `TextChoices`, non `IntegerField` con costanti numeriche.** Un
+`status = 2` in un dump o in una query di debug non dice niente; `'compilato'`
+sì. Il costo (qualche byte per riga, confronti su stringa) è irrilevante al
+volume di questa applicazione, e i valori memorizzati sono già i letterali che
+la specifica usa a testo — inclusa la condizione dell'indice parziale qui
+sotto e il futuro job `mark_passed_events`. Cambiarli significherebbe cambiarli
+in tre posti scollegati fra loro.
+
+**`default=INCERTO`.** L'ingestione da Google Calendar non classifica: scarica e
+basta. Lo stato iniziale corretto è quindi "non ancora classificato", ed è anche
+l'unico default che non mente se qualcuno crea una riga da shell o da fixture.
+
+**`ACTIVE_STATUSES` come costante di modello.** Il sottoinsieme "eventi ancora in
+lavorazione" comparirà in ogni query della pipeline, nella UI degli eventi non
+compilati e nel job di scadenza. Definirlo una volta accanto agli stati evita
+che tre punti diversi elenchino a mano gli stessi due valori e divergano.
+
+### Indice parziale
+
+`CLAUDE.md` §2.2 prevedeva l'indice parziale ma lo dava per non realizzabile,
+mancando il campo di stato. Ora è realizzabile, e con colonne diverse da quelle
+ipotizzate lì:
+
+```python
+indexes = [
+    models.Index(
+        fields=['calendar', 'start_time'],
+        condition=Q(status__in=['incerto', 'classificato']),
+        name='idx_event_active',
+    ),
+]
+```
+
+La bozza originale scriveva `(docente_id, data_evento)`. Nessuna delle due
+colonne esiste su `Event`: il docente si raggiunge attraverso `calendar`
+(`Event -> Calendar -> Docente`), e il campo temporale si chiama `start_time`.
+`calendar_id` è quindi la colonna di scoping corretta — ed è anche più selettiva
+di `docente_id`, dato che un docente può avere più calendari.
+
+Quello che l'indice compra è indipendenza dalla crescita dello storico: le righe
+`compilato`/`passato` si accumulano per anni ma non entrano nell'indice, che
+resta piccolo e in RAM. Verificato sul DB di sviluppo:
+
+```sql
+CREATE INDEX idx_event_active ON public.classificationpipeline_event
+USING btree (calendar_id, start_time)
+WHERE ((status)::text = ANY (ARRAY['incerto', 'classificato']::text[]))
+```
+
+Nessun `db_index=True` su `status`: quattro valori distinti su tutta la tabella
+sono una selettività troppo bassa perché un indice normale serva a qualcosa, e
+l'indice parziale copre già l'unico accesso che conta.
+
+**Alternative scartate**
+
+- *Tabella di transizioni / macchina a stati esplicita*. Utile se servisse un
+  audit trail ("chi ha portato questo evento a compilato e quando"), che al
+  momento non è nei requisiti. Aggiungerebbe una join a ogni query della
+  pipeline per un dato che nessuna schermata mostra.
+- *Booleani separati* (`is_compilato`, `is_passato`). Rappresentano stati
+  mutuamente esclusivi come flag indipendenti, quindi ammettono combinazioni
+  impossibili (`is_compilato and is_passato`) che poi vanno escluse a mano.
+- *`status` su `Calendar` invece che su `Event`*. Lo stato è per-evento: dentro
+  lo stesso calendario convivono eventi compilati e incerti.
+
+**Gap noto e accettato**: `choices` è validato dai form, non dal database né da
+`Model.save()`. Nulla impedisce quindi né una stringa arbitraria né una
+transizione all'indietro (`compilato -> incerto`). È la stessa scelta già fatta
+per `Hook.config` (JSONField senza schema): la validazione arriverà quando
+arriverà il codice che effettua le transizioni, non prima. Il test
+`test_an_invalid_status_is_not_rejected_by_the_database_known_gap` lo fissa.
+
+**Nota per chi scriverà `mark_passed_events`**: la bozza in `CLAUDE.md` §2.3
+filtra su `data_evento__lt=cutoff` con un delta fisso di 30 giorni. Sono
+entrambi sbagliati. Il campo `data_evento` non esiste — il filtro va scritto su
+`start_time`. Scelta chiusa: gli eventi del dominio sono giornalieri, quindi
+`start_time` ed `end_time` cadono nello stesso mese e i due filtri darebbero lo
+stesso risultato; `start_time` è comunque la regola corretta nell'unico caso in
+cui divergono (evento che sfora la mezzanotte dell'ultimo giorno del mese),
+perché l'attività appartiene al mese in cui è stata svolta, non a quello in cui
+è finita. E il cutoff non è
+un delta: la regola definita dall'utente è **giorno 8 del mese successivo a
+quello dell'evento** (un evento di luglio scade l'8 agosto), perché la consegna
+del timesheet è attesa entro il 5–6 e l'8 è il margine. Un delta di 30 giorni
+darebbe date diverse per eventi dello stesso mese, che è esattamente ciò che la
+regola non vuole.
+
+**Fuori scope, ancora aperto**: i campi per la classificazione LLM (score di
+confidenza, classificazione proposta vs confermata) di `CLAUDE.md` §4 punto 17
+restano da progettare — questo cambiamento copre solo lo stato.
+
+Migrazione: `classificationpipeline/0004_event_status_event_idx_event_active.py`.
+
+**File**: `classificationpipeline/models.py`, `classificationpipeline/tests.py`
+
+---
+
+## `mark_passed_events`: la regola di scadenza vive nel manager, non nel command
+
+Il command che promuove a `passato` gli eventi fuori tempo massimo è banale; la
+decisione interessante è *dove* mettere la regola che decide cosa è scaduto.
+
+La regola è: un evento del mese M scade al **giorno 8 del mese M+1**. La consegna
+del timesheet è attesa entro il 5–6 del mese successivo, l'8 è il margine. Un
+evento del 13/07 non ancora `compilato` diventa `passato` l'8 agosto.
+
+È stata scritta come funzione di modulo più un `QuerySet` su `Event`, non dentro
+`handle()`:
+
+```python
+def expiry_cutoff(at=None):
+    now = timezone.localtime(at) if at is not None else timezone.localtime()
+    first_of_this_month = now.replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    if now.day >= 8:
+        return first_of_this_month
+
+    return (first_of_this_month - timedelta(days=1)).replace(day=1)
+
+
+class EventQuerySet(models.QuerySet):
+
+    def active(self):
+        return self.filter(status__in=Event.ACTIVE_STATUSES)
+
+    def expired(self, at=None):
+        return self.active().filter(start_time__lt=expiry_cutoff(at))
+```
+
+Il command si riduce a due righe di lavoro vero:
+
+```python
+expired = Event.objects.expired()
+updated = expired.update(status=Event.Status.PASSATO)
+```
+
+**Perché non dentro `handle()`.** La stessa regola serve ad almeno due
+chiamanti: il job schedulato, e il controllo pre-compilazione previsto per il
+caso limite di `CLAUDE.md` §2.3 (utente che il 5/08 compila luglio mentre il job
+dell'8 sta per congelargli le righe). Quel secondo chiamante deve sapere *quali
+eventi il job considererebbe scaduti* per decidere se riammetterli. Con la
+regola dentro il command dovrebbe riscriverla, e due implementazioni della
+stessa data prima o poi divergono. In un queryset si scrive una volta e si testa
+direttamente, senza passare da `call_command`.
+
+**Il calcolo del mese precedente senza aritmetica sui mesi.** Dal primo del mese,
+`- timedelta(days=1)` porta sempre all'ultimo giorno del mese precedente
+qualunque sia la sua lunghezza, e `.replace(day=1)` torna al suo primo giorno.
+Attraversa febbraio e dicembre→gennaio senza casi speciali e senza `calendar.
+monthrange`, che sarebbe l'alternativa ovvia e più verbosa.
+
+**Il parametro `at`.** Serve a rendere la regola testabile: senza, ogni test
+dovrebbe mockare `timezone.now()` o — peggio — passare o fallire a seconda del
+giorno in cui gira la suite. Gli otto test di `ExpiryCutoffTests` passano date
+fisse e coprono i bordi che contano: il 7 contro l'8, il salto d'anno da gennaio
+a dicembre, febbraio corto.
+
+**`update()` e non un loop con `save()`.** È una singola `UPDATE ... WHERE`: nessun
+oggetto Python istanziato, nessun `post_save` sparato per riga. Su qualche
+migliaio di eventi è la differenza fra istantaneo e minuti.
+
+**`self.stdout.write` e non `print()`.** È ciò che rende il command testabile
+(`call_command(..., stdout=StringIO())` cattura l'output, `print` no) ed evita
+di aggiungere un altro `print` al debito già segnato in `CLAUDE.md` §4 punto 12.
+
+**`--dry-run`.** È un job che scrive su righe che nessun utente sta guardando in
+quel momento. La prima esecuzione in produzione deve poter mostrare il numero
+prima di applicarlo.
+
+**Cadenza giornaliera, non mensile.** Il command è idempotente per costruzione —
+il filtro `active()` esclude già `passato` e `compilato` — quindi le run nei
+giorni in cui non scade nulla non costano niente. Schedularlo solo il giorno 8
+significherebbe perdere il giro se quella notte la macchina è spenta.
+
+**Alternative scartate per lo scheduler**: Celery beat richiede Redis come
+dipendenza infrastrutturale, sproporzionato per un command che gira una volta al
+giorno; ha senso solo se Celery entra comunque nel progetto per le chiamate LLM
+asincrone. Fra cron di sistema e `django-crontab`, il secondo tiene la
+schedulazione in `settings.py`, quindi versionata nel repo invece che in una
+crontab sul server. Nessuno dei due è ancora configurato — vedi
+`DEPLOY_CHECKLIST.md`.
+
+**Fuso orario**: la scadenza è una data di calendario, quindi dipende da quale
+mezzanotte si intende. `TIME_ZONE` è stato portato da `'UTC'` a `'Europe/Rome'`
+(2026-08-26) proprio per questo: con UTC il confine sarebbe stato sfasato di 1–2
+ore e un evento dell'1/08 alle 00:30 ora italiana sarebbe risultato del 31/07,
+scadendo un mese prima del dovuto. `USE_TZ = True` resta invariato, quindi il
+database continua a memorizzare tutto in UTC: `TIME_ZONE` cambia solo come le
+date vengono interpretate e mostrate, non come sono salvate. La toppa alternativa
+— convertire a mano dentro `expiry_cutoff` — avrebbe lasciato il resto
+dell'applicazione (form, template, admin) a ragionare in UTC.
+
+### Perche' `compilato` e' uno stato terminale (domanda gia' emersa una volta)
+
+La domanda naturale guardando il job e': "prima o poi anche gli eventi
+`compilato` dovrebbero diventare `passato`, no?". La risposta e' no, e vale la
+pena scriverlo perche' la domanda si ripresenta.
+
+`passato` non significa "vecchio", significa **"scaduto senza essere mai stato
+compilato"**. E' il complemento di `compilato`, non il suo successore: serve a
+congelare gli eventi che non ce l'hanno fatta, cosi' che non restino `incerto`
+per sempre e non vengano riproposti a ogni ciclo.
+
+Siccome `status` e' un campo solo, una transizione `compilato -> passato`
+**cancellerebbe** l'informazione precedente, e due cose previste dalla specifica
+smetterebbero di funzionare:
+
+- la **deduplicazione in compilazione** (§2.4): il controllo che impedisce a
+  Selenium di reinserire un evento gia' consegnato e' `status == compilato`.
+  Dopo la transizione un evento consegnato a luglio e uno abbandonato a luglio
+  sarebbero indistinguibili;
+- lo **storico delle compilazioni passate** (§2.1): non e' interrogabile se lo
+  stato che diceva "questo l'abbiamo consegnato" e' stato sovrascritto.
+
+La preoccupazione legittima dietro la domanda — "gli eventi vecchi non devono
+pesare sulle query" — e' gia' risolta altrove: `compilato` e' gia' fuori
+dall'indice parziale `idx_event_active`, esattamente come `passato`. Dal punto di
+vista delle query attive i due stati si comportano gia' allo stesso modo.
+
+Se in futuro servisse davvero una nozione di "archiviato", non e' uno stato ma un
+**secondo asse**: un `archived_at` nullable accanto a `status`, che risponde a
+"e' roba vecchia?" senza distruggere la risposta a "era stato compilato?".
+Scartato oggi perche' nessuna query esistente ne avrebbe bisogno.
+
+**File**: `classificationpipeline/models.py`,
+`classificationpipeline/management/commands/mark_passed_events.py`,
+`classificationpipeline/tests.py`
+
+---
+
+## Schedulazione di `mark_passed_events`: cron di sistema, giorni 8-12
+
+**Cosa**: il comando `mark_passed_events` viene lanciato da cron utente con
+schedule `0 3 8-12 * *` (ore 03:00 dei giorni dall'8 al 12 di ogni mese) tramite
+il wrapper `cron_mark_passed_events.sh`; l'installazione della voce di crontab e'
+automatizzata da `install_cron_step4.sh`.
+
+**Alternative considerate**:
+1. Esecuzione giornaliera (`0 3 * * *`).
+2. Esecuzione singola il giorno 8 (`0 3 8 * *`).
+3. `django-crontab` o Celery Beat come scheduler applicativo.
+
+**Perche' questa scelta**:
+
+Il confine di scadenza si muove **una volta al mese**: `expiry_cutoff` salta dal
+primo del mese precedente al primo del mese corrente alle 00:00 del giorno 8. La
+query di `Event.objects.expired()` non e' incrementale — e' un filtro completo su
+`start_time < cutoff` — quindi una run al giorno 12 promuove tutto cio' che
+avrebbe promosso la run del giorno 8. Ne segue che ripetere l'esecuzione dopo il
+confine e' pura ridondanza contro il downtime, mentre le 20+ run mensili prima
+del confine non aggiungono copertura.
+
+Il giorno singolo (alternativa 2) e' invece troppo fragile: se la macchina e'
+spenta o il servizio giu' proprio quella notte, gli eventi restano `incerto` per
+un mese intero. Cinque run coprono una finestra di downtime di quattro giorni al
+costo di quattro `UPDATE` a zero righe su colonne indicizzate.
+
+Una precisazione, perche' l'intuizione naturale e' "mettiamo anche una run il
+giorno 7, nel caso l'8 sia down": non funziona. Una run prima del giorno 8 usa
+ancora il cutoff vecchio, quindi non puo' coprire il confine che non e' ancora
+scattato. La ridondanza ha senso solo **dopo** il confine. (Una run pre-8 non e'
+del tutto inutile in assoluto — promuove eventi di mesi ancora precedenti
+importati in ritardo — ma non e' la copertura che si stava cercando.)
+
+Scartati `django-crontab` e Celery (alternativa 3): entrambi aggiungono una
+dipendenza, e Celery anche un broker e un processo residente, per un job che gira
+cinque volte al mese e non ha bisogno di code, retry distribuiti o concorrenza.
+Cron di sistema e' gia' presente e non ha parti in movimento.
+
+**Nota sul timezone**: cron usa l'ora di sistema, `expiry_cutoff` usa
+`timezone.localtime()` cioe' `TIME_ZONE = 'Europe/Rome'`. Oggi coincidono; su una
+macchina di produzione impostata a UTC la run delle 03:00 cadrebbe alle 05:00
+locali — comunque dentro la finestra, ma va verificato che le due non divergano
+al punto da spostare il *giorno*. `install_cron_step4.sh` stampa il timezone di
+sistema proprio per rendere la discrepanza visibile al momento dell'installazione.
+
+**Perche' un wrapper invece della sola riga di crontab**: cron gira con ambiente
+minimo (nessun virtualenv attivo, `PATH` ridotto, cwd `$HOME`). Il wrapper fissa
+interprete (`.venv/bin/python`) e percorsi in modo esplicito e redirige stdout e
+stderr su `logs/mark_passed_events.log`, che altrimenti cron scarterebbe o
+manderebbe via mail locale. Il caricamento di `.env.dev` non e' un problema:
+`settings.py` lo risolve via `BASE_DIR`, non dalla cwd.
+
+**File**: `cron_mark_passed_events.sh`, `install_cron_step4.sh`,
+`classificationpipeline/management/commands/mark_passed_events.py`

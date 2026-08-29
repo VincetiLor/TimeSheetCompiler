@@ -36,6 +36,11 @@
 
 document.getElementById('container').addEventListener('submit', function(e) {
     const selects = document.querySelectorAll('.select-calendars');
+    if(selects.length > 3){
+        e.preventDefault();
+        alert('inserisci al massimo 3 calendari per sottomissione');
+        return;
+    }
     for (const select of selects) {
         if (select.value === '') {
             e.preventDefault();

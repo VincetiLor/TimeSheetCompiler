@@ -6,4 +6,12 @@ __pycache__/
 *.pyd
 *.db
 *.sqlite3
+*.sqlite3.bak
 CLAUDE.md
+.env
+.env.*
+!.env.example
+dump.json
+
+# Log delle run schedulate (cron)
+TimeSheetCompiler/logs/
