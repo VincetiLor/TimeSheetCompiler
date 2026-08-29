@@ -1082,3 +1082,93 @@ manderebbe via mail locale. Il caricamento di `.env.dev` non e' un problema:
 
 **File**: `cron_mark_passed_events.sh`, `install_cron_step4.sh`,
 `classificationpipeline/management/commands/mark_passed_events.py`
+
+---
+
+## Assorbimento dell'app `calendars` dentro `classificationpipeline`
+
+**Cosa**: l'app Django `calendars` e' stata rimossa. Il suo contenuto residuo
+(`SelectCalendarsView`, il template `eventi_calendars.html`, le rotte e i test)
+vive ora in `classificationpipeline`. Nessuna URL pubblica e' cambiata:
+`/calendars/` e `/events/` rispondono esattamente come prima.
+
+**Alternative considerate**:
+1. Lasciare le due app separate.
+2. Spostare `SelectCalendarsView` in `authentication` invece che in
+   `classificationpipeline`.
+3. Rinominare l'app `classificationpipeline` in `calendars` (l'operazione
+   inversa).
+
+**Perche' questa scelta**:
+
+L'app `calendars` era gia' un guscio vuoto. `models.py` e `admin.py` non
+contenevano niente, e la migration
+`calendars/0002_remove_event_calendar_delete_calendar_delete_event.py`
+documentava che `Calendar` ed `Event` erano stati portati via tempo prima. Ne
+restavano una view, un template, `urls.py` e i test — un'app intera per un
+singolo endpoint.
+
+Il motivo decisivo non e' pero' la dimensione, e' l'accoppiamento: **il form e il
+suo handler erano spaccati tra due app**. `calendars/views.py` renderizzava il
+select multi-calendario, e `classificationpipeline/views.py` ne consumava il POST
+(`request.POST.getlist('calendars')`) rimandando indietro con
+`redirect('calendars:eventi_calendars')`. Un solo ciclo request/response che
+attraversava due app senza che la divisione corrispondesse a un confine reale.
+
+Il rischio dell'operazione era basso per una ragione precisa, verificata prima di
+toccare il codice: **non c'era piu' nessuna componente di schema**.
+`classificationpipeline/0001_initial` dipende solo da
+`authentication/0001_initial`, mai da `calendars`; le tabelle `calendars_*` erano
+gia' state droppate (confermato con `\dt` sul database di sviluppo: esistono solo
+`classificationpipeline_calendar` e `classificationpipeline_event`). Lo
+spostamento e' quindi puro movimento di codice Python, senza migrazione di dati.
+
+Alternativa 2 (`authentication`) era difendibile: la view e' OAuth-adjacent e
+`authentication` possiede gia' `get_token_valido`. Scartata perche'
+l'accoppiamento col POST handler e' piu' forte del legame con l'autenticazione:
+la view produce l'input della pipeline, non gestisce credenziali — quelle le
+delega gia' a `authentication.services`.
+
+Alternativa 3 (rinominare al contrario) avrebbe dato all'app il nome della sua
+struttura dati anziche' quello della sua responsabilita', e avrebbe comunque
+richiesto di rinominare le tabelle esistenti — cioe' una migrazione vera, contro
+zero.
+
+**Il punto che richiedeva attenzione: le URL.** `classificationpipeline` occupava
+gia' la rotta `''` ed era montata sotto il prefisso `events/`, mentre
+`calendars.urls` stava sotto `calendars/`. Spostare la view e basta avrebbe
+provocato una collisione. La soluzione e' spostare i prefissi dentro l'app e
+includerla senza prefisso:
+
+```python
+# mysite/urls.py
+path('', include('classificationpipeline.urls')),
+
+# classificationpipeline/urls.py
+app_name = 'classificationpipeline'
+urlpatterns = [
+    path('calendars/', views.SelectCalendarsView.as_view(), name='eventi_calendars'),
+    path('events/', views.event_compare, name='event_compare'),
+]
+```
+
+Le due alternative erano peggiori: includere due volte lo stesso modulo di URL
+con prefissi diversi crea due istanze dello stesso namespace; annidare sotto
+`/events/calendars/` avrebbe cambiato una URL pubblica e rotto i test esistenti.
+Cosi' invece gli assert dei test su `/calendars/` e `/events/` sono rimasti
+intatti, e l'unico cambiamento di codice chiamante e' stato
+`redirect('calendars:eventi_calendars')` ->
+`redirect('classificationpipeline:eventi_calendars')`.
+
+**Residuo accettato**: in `django_migrations` restano due righe per l'app
+`calendars`. Sono inerti — Django ignora le righe registrate per app che non
+sono in `INSTALLED_APPS` — e cancellarle sarebbe puramente cosmetico, con il
+rischio non nullo di una `DELETE` scritta male su una tabella di sistema. Il
+criterio di accettazione e' stato `manage.py check` pulito, `makemigrations
+--check` senza differenze, `migrate` senza nulla da applicare e la suite verde
+(59 test).
+
+**File**: `classificationpipeline/views.py`, `classificationpipeline/urls.py`,
+`classificationpipeline/tests.py`,
+`classificationpipeline/templates/classificationpipeline/eventi_calendars.html`,
+`mysite/urls.py`, `mysite/settings.py`

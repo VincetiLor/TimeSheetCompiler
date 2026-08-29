@@ -19,9 +19,10 @@ from django.urls import include, path
 
 urlpatterns = [
     path('hooks/', include('hooks.urls')),
-    path('calendars/', include('calendars.urls')),
     path('auth/', include('authentication.urls')),
     path('accounts/', include('allauth.urls')),
-    path('events/', include('classificationpipeline.urls')),
+    # Senza prefisso: classificationpipeline.urls porta i propri
+    # (/calendars/ e /events/), vedi il commento in quel file.
+    path('', include('classificationpipeline.urls')),
     path('admin/', admin.site.urls),
 ]

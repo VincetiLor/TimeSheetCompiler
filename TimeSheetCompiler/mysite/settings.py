@@ -41,7 +41,6 @@ ALLOWED_HOSTS = []
 INSTALLED_APPS = [
     'classificationpipeline.apps.ClassificationpipelineConfig',
     'hooks.apps.HooksConfig',
-    'calendars.apps.CalendarsConfig',
     'authentication.apps.AuthenticationConfig',
     'django.contrib.admin',
     'django.contrib.auth',
