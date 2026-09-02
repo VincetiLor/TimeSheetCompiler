@@ -1,5 +1,4 @@
 from datetime import timedelta
-
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -24,10 +23,7 @@ def expiry_cutoff(at=None):
     if now.day >= 8:
         return first_of_this_month
 
-    # Non siamo ancora all'8: il mese scorso ha ancora tempo per essere
-    # compilato, scade solo quello prima. Tornare indietro di un giorno dal
-    # primo del mese porta all'ultimo del mese precedente qualunque sia la sua
-    # lunghezza, e attraversa dicembre -> gennaio senza casi speciali.
+    # Non siamo ancora all'8: il mese scorso ha ancora tempo per essere compilato 
     return (first_of_this_month - timedelta(days=1)).replace(day=1)
 
 
@@ -62,16 +58,19 @@ class EventQuerySet(models.QuerySet):
         return self.filter(status__in=Event.ACTIVE_STATUSES)
 
     def expired(self, at=None):
-        """Eventi attivi il cui termine di consegna e' gia' passato.
+        #Eventi attivi il cui termine di consegna e' gia' passato.
 
-        E' la stessa regola usata dal command `mark_passed_events` e dal futuro
-        controllo pre-compilazione: vive qui perche' entrambi ne hanno bisogno e
-        due copie divergerebbero.
-        """
         return self.active().filter(start_time__lt=expiry_cutoff(at))
 
 
 class Event(models.Model):
+
+
+    class Category(models.TextChoices):
+        RICERCA_FINANZIATA = 'ricerca_finanziata', 'Ricerca Finanziata'
+        DIDATTICA = 'didattica', 'Didattica'
+        RICERCA_BASE = 'ricerca_base', 'Ricerca Base'
+
 
     class Status(models.TextChoices):
         """
@@ -100,21 +99,34 @@ class Event(models.Model):
         choices=Status.choices,
         default=Status.INCERTO,
     )
+    category = models.CharField(
+        max_length=32,
+        choices=Category.choices,
+        blank=True,
+        default='',      
+    )
 
     objects = EventQuerySet.as_manager()
 
     class Meta:
+        indexes = [
+                    models.Index(
+                        fields=['calendar', 'start_time'],
+                        condition=Q(status__in=['incerto', 'classificato']),
+                        name='idx_event_active',
+                    ),
+                ]
+        
         constraints = [
             models.UniqueConstraint(
                 fields=['calendar', 'event_id'],
                 name='unique_event_to_calendar',
             ),
-        ]
-        indexes = [
-            models.Index(
-                fields=['calendar', 'start_time'],
-                condition=Q(status__in=['incerto', 'classificato']),
-                name='idx_event_active',
+            models.CheckConstraint(
+                condition=(
+                    ~Q(status__in=['classificato', 'compilato']) | ~Q(category='')
+                ),
+                name='category_required_when_classified',
             ),
         ]
 

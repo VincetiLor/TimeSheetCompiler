@@ -26,6 +26,24 @@ from authentication.models import Docente
 from classificationpipeline.models import Calendar, Event, expiry_cutoff
 
 
+def _with_category(kwargs):
+    """Completa i kwargs di Event.objects.create per il vincolo di categoria.
+
+    `category_required_when_classified` impone una categoria a ogni riga
+    classificato/compilato, ma i test qui sotto parlano di *status*: senza
+    questo helper ognuno dovrebbe ripetere una categoria che non sta
+    verificando. La categoria esplicita resta possibile e vince, cosi' i test
+    che parlano davvero di categorie (EventCategoryConstraintTests) non passano
+    da qui.
+    """
+    kwargs = dict(kwargs)
+    needs_category = kwargs.get('status') in (
+        Event.Status.CLASSIFICATO, Event.Status.COMPILATO)
+    if needs_category and not kwargs.get('category'):
+        kwargs['category'] = Event.Category.DIDATTICA
+    return kwargs
+
+
 CALENDAR_LIST_PAYLOAD = {
     'items': [
         {'summary': 'Didattica', 'id': 'didattica@group.calendar.google.com'},
@@ -179,7 +197,7 @@ class EventStatusTests(TestCase):
         return Event.objects.create(
             calendar=self.calendar, event_id=event_id, title='Lezione',
             start_time='2026-09-01T09:00:00Z', end_time='2026-09-01T11:00:00Z',
-            **kwargs)
+            **_with_category(kwargs))
 
     def test_a_new_event_starts_as_incerto(self):
         """Ingestion does not classify: everything enters unclassified and the
@@ -221,6 +239,136 @@ class EventStatusTests(TestCase):
         event.refresh_from_db()
 
         self.assertEqual(event.status, 'qualunque-cosa')
+
+
+class EventCategoryConstraintTests(TestCase):
+    """`category_required_when_classified` e' l'unica cosa che impedisce a un
+    evento di dirsi classificato senza dire in che categoria.
+
+    Il vincolo e' scritto come implicazione (`status classificato/compilato ->
+    category non vuota`), non come congiunzione: la differenza e' che gli stati
+    fuori dalla pipeline restano liberi di non avere categoria. Questi test
+    fissano entrambi i lati, perche' una congiunzione passerebbe i test sul
+    ramo classificato e fallirebbe su tutto il resto.
+    """
+
+    def setUp(self):
+        user = User.objects.create_user(username='docente')
+        docente = Docente.objects.create(
+            user=user, id_unimore=4242, cognome='Rossi')
+        self.calendar = Calendar.objects.create(
+            docente=docente, calendar_id='cal-a@google.com', title='Didattica')
+
+    def _create(self, event_id, **kwargs):
+        return Event.objects.create(
+            calendar=self.calendar, event_id=event_id, title='Lezione',
+            start_time='2026-09-01T09:00:00Z', end_time='2026-09-01T11:00:00Z',
+            **kwargs)
+
+    def test_a_new_event_has_no_category(self):
+        """L'ingestione non classifica: la categoria arriva dopo, da un hook,
+        dall'LLM o da una scelta manuale.
+        """
+        event = self._create('evt-1')
+
+        self.assertEqual(event.category, '')
+
+    def test_classificato_without_a_category_is_rejected(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self._create('evt-1', status=Event.Status.CLASSIFICATO)
+
+    def test_compilato_without_a_category_is_rejected(self):
+        """compilato e' lo stato terminale: se ci arriva senza categoria,
+        l'informazione finita nel timesheet non e' piu' ricostruibile.
+        """
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self._create('evt-1', status=Event.Status.COMPILATO)
+
+    def test_incerto_without_a_category_is_allowed(self):
+        event = self._create('evt-1', status=Event.Status.INCERTO)
+
+        self.assertEqual(event.status, Event.Status.INCERTO)
+        self.assertEqual(event.category, '')
+
+    def test_passato_without_a_category_is_allowed(self):
+        """Un evento scaduto senza essere mai stato classificato e' il caso
+        normale, non un errore: mark_passed_events lo promuove com'e'.
+        """
+        event = self._create('evt-1', status=Event.Status.PASSATO)
+
+        self.assertEqual(event.category, '')
+
+    def test_classificato_with_a_category_is_accepted(self):
+        event = self._create(
+            'evt-1', status=Event.Status.CLASSIFICATO,
+            category=Event.Category.RICERCA_FINANZIATA)
+
+        event.refresh_from_db()
+        self.assertEqual(event.category, 'ricerca_finanziata')
+
+    def test_clearing_the_category_of_a_classified_event_is_rejected(self):
+        """Il vincolo vale a ogni scrittura, non solo alla creazione: e' quello
+        che rende sicuro un annulla fatto come update di massa.
+        """
+        event = self._create(
+            'evt-1', status=Event.Status.CLASSIFICATO,
+            category=Event.Category.DIDATTICA)
+
+        event.category = ''
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                event.save()
+
+    def test_undoing_a_classification_means_clearing_status_and_category_together(self):
+        """La sola mossa consentita per togliere una classificazione: tornare a
+        incerto e svuotare la categoria nella stessa scrittura.
+        """
+        event = self._create(
+            'evt-1', status=Event.Status.CLASSIFICATO,
+            category=Event.Category.DIDATTICA)
+
+        Event.objects.filter(pk=event.pk).update(
+            status=Event.Status.INCERTO, category='')
+
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.INCERTO)
+        self.assertEqual(event.category, '')
+
+    def test_an_expired_classified_event_keeps_its_category(self):
+        """mark_passed_events sposta solo lo status. La categoria resta, e il
+        vincolo non la richiede piu': entrambe le cose vanno bene insieme.
+        """
+        event = self._create(
+            'evt-1', status=Event.Status.CLASSIFICATO,
+            category=Event.Category.DIDATTICA)
+
+        Event.objects.filter(pk=event.pk).update(status=Event.Status.PASSATO)
+
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.PASSATO)
+        self.assertEqual(event.category, 'didattica')
+
+    def test_stored_category_values_are_the_literals_the_hooks_config_uses(self):
+        """Le chiavi di `Hook.config` sono queste stringhe: il form degli hook
+        costruisce il suo menu da `Event.Category.choices`, quindi i due lati
+        restano allineati solo finche' questi valori non cambiano in silenzio.
+        """
+        self.assertEqual(
+            [value for value, _ in Event.Category.choices],
+            ['ricerca_finanziata', 'didattica', 'ricerca_base'])
+
+    def test_an_unknown_category_is_not_rejected_by_the_database_known_gap(self):
+        """Known gap, gemello di quello su status: `choices` e' validato dai
+        form, non dal database. Il vincolo controlla che la categoria non sia
+        vuota, non che sia una di quelle previste.
+        """
+        event = self._create(
+            'evt-1', status=Event.Status.CLASSIFICATO, category='inventata')
+
+        event.refresh_from_db()
+        self.assertEqual(event.category, 'inventata')
 
 
 class ExpiryCutoffTests(TestCase):
@@ -281,7 +429,8 @@ class MarkPassedEventsCommandTests(TestCase):
     def _event(self, event_id, start, status=Event.Status.INCERTO):
         return Event.objects.create(
             calendar=self.calendar, event_id=event_id, title='Lezione',
-            start_time=start, end_time=start, status=status)
+            start_time=start, end_time=start,
+            **_with_category({'status': status}))
 
     def _long_expired(self, event_id, status=Event.Status.INCERTO):
         """An event old enough to be expired whatever day the suite runs."""
@@ -366,7 +515,7 @@ class EventQuerySetTests(TestCase):
         return Event.objects.create(
             calendar=self.calendar, event_id=event_id, title='Lezione',
             start_time='2026-09-01T09:00:00Z', end_time='2026-09-01T11:00:00Z',
-            status=status)
+            **_with_category({'status': status}))
 
     def test_active_selects_only_the_events_still_in_the_pipeline(self):
         self._event('evt-1', Event.Status.INCERTO)
@@ -385,7 +534,8 @@ class EventQuerySetTests(TestCase):
         old = datetime(2020, 1, 15, 9, 0, tzinfo=dt_timezone.utc)
         Event.objects.create(
             calendar=self.calendar, event_id='evt-1', title='Lezione',
-            start_time=old, end_time=old, status=Event.Status.COMPILATO)
+            start_time=old, end_time=old, status=Event.Status.COMPILATO,
+            category=Event.Category.DIDATTICA)
 
         self.assertEqual(Event.objects.expired().count(), 0)
 
