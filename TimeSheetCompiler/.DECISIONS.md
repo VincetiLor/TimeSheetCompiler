@@ -1172,3 +1172,38 @@ criterio di accettazione e' stato `manage.py check` pulito, `makemigrations
 `classificationpipeline/tests.py`,
 `classificationpipeline/templates/classificationpipeline/eventi_calendars.html`,
 `mysite/urls.py`, `mysite/settings.py`
+
+---
+
+## (In sospeso) Keyword multiple separate da virgola nel form hook
+
+Il form delle regole accetta una keyword per riga. Se l'utente ne scrive piu' di
+una separandole con la virgola, la stringa viene salvata intera: `clean_keyword`
+si limita a `.strip().lower()`, non fa nessuno split.
+
+```python
+# input:  keyword = "lezione, esame, tesi"
+# db:     {'didattica': ['lezione, esame, tesi']}
+```
+
+Tre conseguenze, in ordine di gravita':
+
+1. Il matcher cerca la sottostringa letterale `"lezione, esame, tesi"` nel titolo
+   dell'evento: non corrispondera' mai a nulla, quindi la regola e' inerte.
+2. Il controllo di collisione in `BaseHookRuleFormSet.clean` confronta stringhe
+   intere, quindi `"lezione, esame"` non collide con una regola `"lezione"` gia'
+   assegnata a un'altra categoria: la protezione che esiste proprio per impedire
+   la doppia assegnazione viene aggirata.
+3. Al reload la riga torna identica a come e' stata scritta, quindi l'utente non
+   riceve nessun segnale che la regola non funziona.
+
+Due strade possibili, non ancora scelte:
+
+- **Rifiuto**: `clean_keyword` solleva `ValidationError` se la stringa contiene
+  una virgola. Un vincolo in piu' da spiegare, ma non cambia niente del resto.
+- **Split**: una riga con virgole diventa N keyword. Piu' comodo da usare, ma
+  cambia la cardinalita' del form — la riga scritta non e' piu' la riga che
+  torna al reload, che si presenta divisa in N righe — e il controllo di
+  collisione va rifatto sui pezzi, non sulla stringa.
+
+**File**: `hooks/views.py`

@@ -1,17 +1,63 @@
-{% extends "index.html" %}
+  {% extends "index.html" %}
 
-{% block titolo %}Classify Events{% endblock %}
+  {% block titolo %}Hooks Settings{% endblock %}
 
-{% block content %}
+  {% block content %}
 
-<h1 class="text-2xl font-bold mb-4">Hooks Settings</h1>
-<h2 class="text-xl font-semibold mb-2">Configura il tuo Json con i tuoi Hooks personalizzati</h2>
+  <h1 class="text-2xl font-bold mb-4">Hooks Settings</h1>
+  <h2 class="text-xl font-semibold mb-2">Associa una categoria a ogni parola chiave</h2>
 
-<form method="post">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Salva</button>
-</form>
+  <form method="post">
+      {% csrf_token %}
+      {{ form.management_form }}
 
+      {% for error in form.non_form_errors %}
+          <p class="text-red-600">{{ error }}</p>
+      {% endfor %}
 
-{% endblock %}
+      <table id="regole">
+          <thead>
+              <tr><th>Categoria</th><th>Parola chiave</th><th>Elimina</th></tr>
+          </thead>
+          <tbody id="corpo-regole">
+          {% for riga in form %}
+              <tr>
+                  <td>{{ riga.category }}{{ riga.category.errors }}</td>
+                  <td>{{ riga.keyword }}{{ riga.keyword.errors }}</td>
+                  <td>{{ riga.DELETE }}</td>
+              </tr>
+          {% endfor %}
+          </tbody>
+      </table>
+
+      <button type="button" id="aggiungi-regola">Aggiungi regola</button>
+      <button type="submit">Salva</button>
+  </form>
+
+  {# Riga vuota da clonare: __prefix__ e' il segnaposto che Django mette
+     nell'empty_form al posto dell'indice, sostituito al momento del clone. #}
+  <template id="modello-regola">
+      <tr>
+          <td>{{ form.empty_form.category }}</td>
+          <td>{{ form.empty_form.keyword }}</td>
+          <td>{{ form.empty_form.DELETE }}</td>
+      </tr>
+  </template>
+
+  <script>
+      (function () {
+          const corpo = document.getElementById('corpo-regole');
+          const modello = document.getElementById('modello-regola');
+          const totale = document.getElementById('id_form-TOTAL_FORMS');
+
+          document.getElementById('aggiungi-regola').addEventListener('click', function () {
+              const indice = parseInt(totale.value, 10);
+              const riga = document.createElement('tbody');
+              riga.innerHTML = modello.innerHTML.replaceAll('__prefix__', indice);
+              corpo.appendChild(riga.firstElementChild);
+              totale.value = indice + 1;
+          });
+      })();
+  </script>
+
+  {% endblock %}
