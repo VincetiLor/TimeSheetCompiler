@@ -1207,3 +1207,50 @@ Due strade possibili, non ancora scelte:
   collisione va rifatto sui pezzi, non sulla stringa.
 
 **File**: `hooks/views.py`
+
+---
+
+## Conversione di `start`/`end` di Google in `DateTimeField`
+
+`Event.start_time`/`end_time` sono `DateTimeField` obbligatori, ma l'API di
+Google restituisce il nodo `start`/`end` in due forme mutuamente esclusive:
+`{'dateTime': '...'}` per gli eventi con orario, `{'date': '...'}` per quelli di
+giornata intera. Leggere direttamente `event['start']['dateTime']` fallisce con
+`KeyError` al primo evento del secondo tipo, quindi l'ingestione passa da un
+helper unico:
+
+```python
+def parse_google_datetime(node, calendar_tz):
+    if 'dateTime' in node:
+        return datetime.fromisoformat(node['dateTime'])
+
+    giorno = datetime.fromisoformat(node['date'])
+    return giorno.replace(tzinfo=ZoneInfo(calendar_tz))
+```
+
+Due scelte dentro poche righe.
+
+**`datetime.fromisoformat` invece di `dateutil.parser`**: il formato RFC3339 di
+Google e' gia' digerito dalla libreria standard su Python 3.12, offset e suffisso
+`Z` compresi. Nessuna dipendenza nuova per un problema che non ce l'ha.
+
+**Mezzanotte nel fuso del calendario, non in quello del server**: per le giornate
+intere l'orario va inventato, e il fuso corretto e' quello del calendario di
+provenienza, letto dal campo top-level `timeZone` della stessa risposta
+(`data.get('timeZone', settings.TIME_ZONE)`). Usare il fuso del server darebbe
+risultati diversi per calendari di fusi diversi, e sposterebbe l'evento di giorno
+ai confini di mezzanotte — con effetti sulla regola di scadenza, che filtra
+proprio su `start_time`.
+
+**In sospeso — durata delle giornate intere**: per questi eventi `end.date` e'
+*esclusivo* (un evento del solo 8 settembre ha `end.date` = 9 settembre), quindi
+la durata che se ne ricava e' di 24 ore. Per un timesheet e' quasi certamente
+sbagliato. Le strade sono tre, nessuna ancora scelta: scartare gli eventi di
+giornata intera dall'ingestione; normalizzare in scrittura a una durata
+convenzionale (es. 8 ore), eventualmente con un booleano `all_day` per non
+perdere il dato originale; oppure salvare i valori reali e applicare la
+convenzione in lettura, con l'onere che ogni punto che somma ore se ne ricordi.
+Va decisa prima della pagina "eventi non compilati" (§2.6 di `CLAUDE.md`), che
+espone il totale ore.
+
+**File**: `classificationpipeline/views.py`

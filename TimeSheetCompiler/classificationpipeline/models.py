@@ -20,7 +20,7 @@ def expiry_cutoff(at=None):
     first_of_this_month = now.replace(
         day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    if now.day >= 8:
+    if now.day >= 8:        
         return first_of_this_month
 
     # Non siamo ancora all'8: il mese scorso ha ancora tempo per essere compilato 

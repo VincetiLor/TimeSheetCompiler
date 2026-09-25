@@ -5,6 +5,78 @@
 {% block content %}
     <h2 class="text-xl font-bold mb-6 text-center mt-10">Confronto Eventi</h2>
 
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h3 class="text-lg font-semibold mb-4">Calendari Selezionati:</h3>
+    <div class="bg-white p-6 rounded-lg shadow-md w-11/12 max-w-4xl mb-10">
+
+        <h3 class="text-lg font-semibold mb-4">
+            Eventi classificati ({{ eventi_classificati|length }})
+        </h3>
+
+        {% if eventi_classificati %}
+            <table class="w-full text-left text-sm">
+                <thead class="border-b border-gray-300">
+                    <tr>
+                        <th class="py-2">Evento</th>
+                        <th class="py-2">Calendario</th>
+                        <th class="py-2">Data</th>
+                        <th class="py-2">Orario</th>
+                        <th class="py-2">Categoria</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for evento in eventi_classificati %}
+                        <tr class="border-b border-gray-100">
+                            <td class="py-2">{{ evento.title|default:"(senza titolo)" }}</td>
+                            <td class="py-2 text-gray-500">{{ evento.calendar.title }}</td>
+                            <td class="py-2">{{ evento.start_time|date:"d/m/Y" }}</td>
+                            <td class="py-2">
+                                {{ evento.start_time|date:"H:i" }}–{{ evento.end_time|date:"H:i" }}
+                            </td>
+                            <td class="py-2">
+                                <span class="px-2 py-1 rounded bg-green-100 text-green-800">
+                                    {{ evento.get_category_display }}
+                                </span>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="text-gray-500">
+                Nessun evento classificato: nessuna delle keyword configurate
+                corrisponde ai titoli di questo periodo.
+            </p>
+        {% endif %}
+
+        <h3 class="text-lg font-semibold mb-4 mt-8">
+            Eventi incerti ({{ eventi_incerti|length }})
+        </h3>
+
+        {% if eventi_incerti %}
+            <table class="w-full text-left text-sm">
+                <thead class="border-b border-gray-300">
+                    <tr>
+                        <th class="py-2">Evento</th>
+                        <th class="py-2">Calendario</th>
+                        <th class="py-2">Data</th>
+                        <th class="py-2">Orario</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for evento in eventi_incerti %}
+                        <tr class="border-b border-gray-100">
+                            <td class="py-2">{{ evento.title|default:"(senza titolo)" }}</td>
+                            <td class="py-2 text-gray-500">{{ evento.calendar.title }}</td>
+                            <td class="py-2">{{ evento.start_time|date:"d/m/Y" }}</td>
+                            <td class="py-2">
+                                {{ evento.start_time|date:"H:i" }}–{{ evento.end_time|date:"H:i" }}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="text-gray-500">Nessun evento incerto.</p>
+        {% endif %}
+
+    </div>
 {% endblock %}
