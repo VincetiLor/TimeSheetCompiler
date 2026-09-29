@@ -66,6 +66,11 @@ Aggiornare questo file ogni volta che si introduce una nuova scorciatoia dev-onl
 
 ## Da configurare ex-novo per il deploy (non presente affatto oggi)
 
+- **Static files**: `STATIC_ROOT` non è definito, quindi `collectstatic` oggi
+  fallisce. Va definito e i file vanno serviti da nginx o WhiteNoise. Il CSS
+  Tailwind (`static/css/app.css`) è già compilato e committato: sul server non
+  serve Tailwind. Verificare solo che sia stato ricompilato con `--minify` dopo
+  l'ultima modifica ai template.
 - Autenticazione Shibboleth reale (oggi solo scaffolding dev-mode, container non integrato)
 - HTTPS/TLS davanti all'app (nessuna configurazione presente)
 - CI/CD, health check, logging centralizzato (oggi solo `print()` sparsi, nessun `logging`)
@@ -102,8 +107,7 @@ Aggiornare questo file ogni volta che si introduce una nuova scorciatoia dev-onl
   `_known_gap` asseriscono il comportamento sbagliato attuale. Quando il bug
   corrispondente viene corretto **il test fallisce di proposito**: va
   aggiornato, non cancellato. Elenco: `Hook_settings` senza `Docente`,
-  `LoginRequiredMixin` mancante su `SelectCalendarsView`, `event_compare`
-  raggiungibile da anonimo, nessuna validazione di schema su `Hook.config`,
+  nessuna validazione di schema su `Hook.config`,
   nessun enforcement delle transizioni di `Event.status` (una stringa
   arbitraria e un passo all'indietro `compilato -> incerto` passano entrambi).
   Il vincolo di unicita' su `(calendar, event_id)` era in questo elenco: e'

@@ -1,0 +1,9 @@
+/* Sorgente di Tailwind: NON viene servito. La CLI standalone lo compila in
+   static/css/app.css (vedi comandi in DECISIONS.md / CLAUDE.md).
+   source(none) disattiva l'auto-rilevamento: vengono scansionati solo i
+   percorsi elencati sotto, relativi a questo file. */
+@import "tailwindcss" source(none);
+
+@source "../templates";
+@source "../*/templates/**/*.html";
+@source "../*/static/**/*.js";

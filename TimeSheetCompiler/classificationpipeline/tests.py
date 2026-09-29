@@ -1,18 +1,13 @@
 """Tests for the classification pipeline: calendar selection, event
 comparison entry point, models and the expiry job.
 
-The event_compare tests are deliberately thin: the view currently only echoes
-the selected calendar ids into the template context. Nothing writes
-Calendar/Event rows anywhere in the codebase yet, so there is no persistence to
-assert on - the model tests below exercise the schema directly.
-
-No call actually leaves the process in SelectCalendarsViewTests:
-authentication.services.get_token_valido is patched where
-classificationpipeline.views imports it, and the Google calendarList call is
-patched at classificationpipeline.views.requests.get.
+No call actually leaves the process in SelectCalendarsViewTests or
+EventCompareTests: authentication.services.get_token_valido is patched where
+classificationpipeline.views imports it, and the Google calendarList/events
+calls are patched at classificationpipeline.views.requests.get.
 """
 
-from datetime import date, datetime, timezone as dt_timezone
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from io import StringIO
 from unittest import mock
 
@@ -54,59 +49,227 @@ CALENDAR_LIST_PAYLOAD = {
 
 @override_settings(SHIBBOLETH_DEV_MODE=False)
 class EventCompareTests(TestCase):
+    """The POST fetches the current month's events of each selected calendar,
+    caches them as Calendar/Event rows and classifies the incerto ones with the
+    docente's hooks. Google is never reached: get_token_valido and
+    requests.get are patched where classificationpipeline.views imports them.
+    """
+
+    CAL_A = 'cal-a@google.com'
+    CAL_B = 'cal-b@google.com'
 
     def setUp(self):
         self.user = User.objects.create_user(username='docente')
         self.docente = Docente.objects.create(
             user=self.user, id_unimore=4242, cognome='Rossi')
+        # The Hook row is created by the post_save signal on Docente.
+        self.docente.hook.config = {'didattica': ['lezione']}
+        self.docente.hook.save()
+
+        # Day 2 of the current month always falls inside the window the view
+        # queries (first of this month -> first of next month).
+        self.day2 = timezone.localtime().replace(
+            day=2, hour=10, minute=0, second=0, microsecond=0)
+
+    def _google_response(self, payload, status_code=200):
+        response = mock.Mock(status_code=status_code)
+        response.json.return_value = payload
+        return response
+
+    def _events_payload(self, summary='Calendario A'):
+        return {
+            'summary': summary,
+            'timeZone': 'Europe/Rome',
+            'items': [
+                {
+                    'id': 'ev-lezione',
+                    'summary': 'Lezione di Analisi',
+                    'start': {'dateTime': self.day2.isoformat()},
+                    'end': {'dateTime': (self.day2 + timedelta(hours=2)).isoformat()},
+                },
+                {
+                    'id': 'ev-riunione',
+                    'summary': 'Riunione di dipartimento',
+                    'start': {'dateTime': (self.day2 + timedelta(hours=3)).isoformat()},
+                    'end': {'dateTime': (self.day2 + timedelta(hours=4)).isoformat()},
+                },
+                {
+                    'id': 'ev-convegno',
+                    'summary': 'Convegno',
+                    'start': {'date': self.day2.date().isoformat()},
+                    'end': {'date': (self.day2.date() + timedelta(days=1)).isoformat()},
+                },
+            ],
+        }
+
+    def test_anonymous_get_is_redirected_to_login(self):
+        response = self.client.get('/events/')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/auth/?next=/events/')
+
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido')
+    def test_anonymous_post_is_redirected_to_login_before_any_google_call(
+            self, mock_token, mock_get):
+        response = self.client.post('/events/', {'calendars': [self.CAL_A]})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/auth/?next=/events/')
+        mock_token.assert_not_called()
+        mock_get.assert_not_called()
 
     def test_get_redirects_back_to_calendar_selection(self):
+        self.client.force_login(self.user)
+
         response = self.client.get('/events/')
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, '/calendars/')
 
-    def test_post_passes_selected_calendar_ids_to_the_template(self):
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', side_effect=Exception('no token'))
+    def test_missing_google_token_redirects_to_calendar_selection(self, mock_token, mock_get):
         self.client.force_login(self.user)
 
-        response = self.client.post(
-            '/events/', {'calendars': ['cal-a@google.com', 'cal-b@google.com']})
+        response = self.client.post('/events/', {'calendars': [self.CAL_A]})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/calendars/')
+        mock_get.assert_not_called()
+
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_each_selected_calendar_is_fetched_with_the_token(self, mock_token, mock_get):
+        mock_get.return_value = self._google_response({'items': []})
+        self.client.force_login(self.user)
+
+        response = self.client.post('/events/', {'calendars': [self.CAL_A, self.CAL_B]})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.context['calendar_ids'],
-            ['cal-a@google.com', 'cal-b@google.com'])
+        self.assertEqual(response.context['calendar_ids'], [self.CAL_A, self.CAL_B])
+        self.assertEqual(mock_get.call_count, 2)
+        urls = [c.args[0] for c in mock_get.call_args_list]
+        self.assertIn(self.CAL_A, urls[0])
+        self.assertIn(self.CAL_B, urls[1])
+        for c in mock_get.call_args_list:
+            self.assertEqual(c.kwargs['headers']['Authorization'], 'Bearer access-token')
 
-    def test_post_without_any_calendar_yields_an_empty_list(self):
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_post_without_any_calendar_fetches_nothing(self, mock_token, mock_get):
         self.client.force_login(self.user)
 
         response = self.client.post('/events/', {})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context['calendar_ids'], [])
+        mock_get.assert_not_called()
+        self.assertEqual(Calendar.objects.count(), 0)
 
-    def test_post_is_reachable_anonymously_known_gap(self):
-        """Known gap: the view has no authentication guard at all, so an
-        anonymous POST reaches the classification entry point. Harmless while
-        the view is a stub; it must be revisited once the pipeline touches
-        per-docente data.
-        """
-        response = self.client.post('/events/', {'calendars': ['cal-a@google.com']})
-
-        self.assertEqual(response.status_code, 200)
-
-    def test_no_calendar_or_event_row_is_persisted_yet_known_gap(self):
-        """Known gap: the classification pipeline is not implemented, so the
-        POST that is supposed to start it stores nothing. This test fails as
-        soon as ingestion is added, which is the signal to replace it with
-        real assertions on the created rows.
-        """
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_events_are_stored_under_the_docente_calendar(self, mock_token, mock_get):
+        mock_get.return_value = self._google_response(self._events_payload())
         self.client.force_login(self.user)
 
-        self.client.post('/events/', {'calendars': ['cal-a@google.com']})
+        self.client.post('/events/', {'calendars': [self.CAL_A]})
 
-        self.assertEqual(Calendar.objects.count(), 0)
-        self.assertEqual(Event.objects.count(), 0)
+        calendar = Calendar.objects.get()
+        self.assertEqual(calendar.docente, self.docente)
+        self.assertEqual(calendar.calendar_id, self.CAL_A)
+        self.assertEqual(calendar.title, 'Calendario A')
+        self.assertEqual(
+            set(calendar.events.values_list('event_id', flat=True)),
+            {'ev-lezione', 'ev-riunione', 'ev-convegno'})
+
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_all_day_event_starts_at_midnight_in_the_calendar_timezone(
+            self, mock_token, mock_get):
+        mock_get.return_value = self._google_response(self._events_payload())
+        self.client.force_login(self.user)
+
+        self.client.post('/events/', {'calendars': [self.CAL_A]})
+
+        convegno = Event.objects.get(event_id='ev-convegno')
+        start = timezone.localtime(convegno.start_time)
+        self.assertEqual(start.date(), self.day2.date())
+        self.assertEqual((start.hour, start.minute), (0, 0))
+        self.assertEqual(convegno.end_time - convegno.start_time, timedelta(days=1))
+
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_hook_keyword_classifies_the_event_and_the_rest_stays_incerto(
+            self, mock_token, mock_get):
+        mock_get.return_value = self._google_response(self._events_payload())
+        self.client.force_login(self.user)
+
+        response = self.client.post('/events/', {'calendars': [self.CAL_A]})
+
+        lezione = Event.objects.get(event_id='ev-lezione')
+        self.assertEqual(lezione.status, Event.Status.CLASSIFICATO)
+        self.assertEqual(lezione.category, Event.Category.DIDATTICA)
+        riunione = Event.objects.get(event_id='ev-riunione')
+        self.assertEqual(riunione.status, Event.Status.INCERTO)
+        self.assertEqual(riunione.category, '')
+
+        self.assertEqual(
+            [e.event_id for e in response.context['eventi_classificati']],
+            ['ev-lezione'])
+        self.assertEqual(
+            {e.event_id for e in response.context['eventi_incerti']},
+            {'ev-riunione', 'ev-convegno'})
+
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_a_second_post_updates_rows_instead_of_duplicating_them(
+            self, mock_token, mock_get):
+        mock_get.return_value = self._google_response(self._events_payload())
+        self.client.force_login(self.user)
+        self.client.post('/events/', {'calendars': [self.CAL_A]})
+
+        payload = self._events_payload(summary='Calendario A rinominato')
+        payload['items'][1]['summary'] = 'Riunione spostata'
+        mock_get.return_value = self._google_response(payload)
+        self.client.post('/events/', {'calendars': [self.CAL_A]})
+
+        self.assertEqual(Calendar.objects.count(), 1)
+        self.assertEqual(Event.objects.count(), 3)
+        self.assertEqual(Event.objects.get(event_id='ev-riunione').title, 'Riunione spostata')
+
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_a_calendar_google_refuses_is_skipped(self, mock_token, mock_get):
+        mock_get.side_effect = [
+            self._google_response({}, status_code=404),
+            self._google_response(self._events_payload(summary='Calendario B')),
+        ]
+        self.client.force_login(self.user)
+
+        response = self.client.post('/events/', {'calendars': [self.CAL_A, self.CAL_B]})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            list(Calendar.objects.values_list('calendar_id', flat=True)), [self.CAL_B])
+
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_events_of_another_docente_are_not_shown(self, mock_token, mock_get):
+        other_user = User.objects.create_user(username='altro')
+        other = Docente.objects.create(user=other_user, id_unimore=9999, cognome='Bianchi')
+        other_calendar = Calendar.objects.create(
+            docente=other, calendar_id=self.CAL_A, title='Suo')
+        Event.objects.create(
+            calendar=other_calendar, event_id='ev-altrui', title='Lezione altrui',
+            start_time=self.day2, end_time=self.day2 + timedelta(hours=1))
+        mock_get.return_value = self._google_response({'items': []})
+        self.client.force_login(self.user)
+
+        response = self.client.post('/events/', {'calendars': [self.CAL_A]})
+
+        self.assertEqual(list(response.context['eventi_classificati']), [])
+        self.assertEqual(list(response.context['eventi_incerti']), [])
 
 
 @override_settings(SHIBBOLETH_DEV_MODE=False)
@@ -589,13 +752,13 @@ class SelectCalendarsViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, '/auth/avvia-login-google/?next=/calendars/')
 
-    def test_anonymous_user_is_sent_to_google_login_not_to_login_url_known_gap(self):
-        """Known gap: this view has no LoginRequiredMixin, so an anonymous
-        request falls into the bare except in dispatch and is routed to the
-        Google OAuth starter instead of LOGIN_URL. Pinned to make the missing
-        mixin visible; the assertion changes when it is added.
-        """
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido')
+    def test_anonymous_user_is_sent_to_login_url_before_any_google_call(
+            self, mock_token, mock_get):
         response = self.client.get('/calendars/')
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/auth/avvia-login-google/?next=/calendars/')
+        self.assertEqual(response.url, '/auth/?next=/calendars/')
+        mock_token.assert_not_called()
+        mock_get.assert_not_called()

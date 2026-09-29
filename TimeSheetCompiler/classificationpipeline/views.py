@@ -1,3 +1,5 @@
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.generic import TemplateView
@@ -16,16 +18,19 @@ from authentication.services import get_token_valido
 GOOGLE_API_TIMEOUT = (5, 10)
 
 
-class SelectCalendarsView(TemplateView):
+class SelectCalendarsView(LoginRequiredMixin, TemplateView):
     template_name = 'classificationpipeline/eventi_calendars.html'
     context_object_name = 'calendars'
 
-    def dispatch(self, request, *args, **kwargs):
+    # Il token si cerca in get() e non in dispatch(): un dispatch() definito qui
+    # girerebbe prima di quello di LoginRequiredMixin, e un anonimo finirebbe
+    # all'OAuth Google invece che a LOGIN_URL.
+    def get(self, request, *args, **kwargs):
         try:
             self.token = get_token_valido(self.request.user)
         except:
              return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
-        return super().dispatch(request, *args, **kwargs)
+        return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -68,6 +73,7 @@ def parse_google_datetime(node, calendar_tz):
     return giorno.replace(tzinfo=ZoneInfo(calendar_tz))
 
 
+@login_required
 def event_compare(request):
 
     if request.method == 'POST':

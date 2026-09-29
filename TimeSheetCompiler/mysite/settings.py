@@ -184,6 +184,11 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# CSS compilato da Tailwind (static/css/app.css), generato dalla CLI standalone
+# partendo da tailwind/input.css. Il file generato e' committato: in produzione
+# Tailwind non serve, basta collectstatic.
+STATICFILES_DIRS = [BASE_DIR / 'static']
+
 
 SOCIALACCOUNT_PROVIDERS = {
     'google': {

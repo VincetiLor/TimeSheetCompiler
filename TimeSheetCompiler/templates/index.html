@@ -1,10 +1,11 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="it">
 <head>
     <meta charset="UTF-8">
     <title>{% block titolo %}Il mio sito{% endblock %}</title>
     {% block css_extra %}{% endblock %}
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
 <body>
     <div class="min-h-screen flex flex-col  relative items-center bg-gradient-to-r from-blue-500 to-purple-600">
