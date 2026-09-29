@@ -69,9 +69,9 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 
-LOGIN_URL = '/auth/'
-LOGIN_REDIRECT_URL = '/auth/'
-LOGOUT_REDIRECT_URL = '/auth/'
+LOGIN_URL = '/index/'
+LOGIN_REDIRECT_URL = '/index/'
+LOGOUT_REDIRECT_URL = '/index/'
 
 
 MIDDLEWARE = [

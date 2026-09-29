@@ -1,0 +1,41 @@
+{% comment %}
+Tabella eventi, condivisa fra classificati e incerti. Parametri:
+  eventi     - queryset di Event
+  categoria  - True per mostrare la colonna Categoria
+Gli eventi "giornata intera" arrivano da Google come mezzanotte-mezzanotte
+(vedi parse_google_datetime): mostrarli come 00:00-00:00 sembrerebbe un errore.
+{% endcomment %}
+<div class="overflow-x-auto">
+    <table class="w-full min-w-[36rem] text-left">
+        <thead class="border-b border-linea text-sm text-inchiostro">
+            <tr>
+                <th scope="col" class="px-5 py-3 font-semibold">Evento</th>
+                <th scope="col" class="px-5 py-3 font-semibold">Calendario</th>
+                <th scope="col" class="px-5 py-3 font-semibold whitespace-nowrap">Data</th>
+                <th scope="col" class="px-5 py-3 font-semibold">Orario</th>
+                {% if categoria %}<th scope="col" class="px-5 py-3 font-semibold">Categoria</th>{% endif %}
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-linea">
+            {% for evento in eventi %}
+            <tr>
+                <td class="px-5 py-3 text-inchiostro">{{ evento.title|default:"(senza titolo)" }}</td>
+                <td class="px-5 py-3">{{ evento.calendar.title }}</td>
+                <td class="px-5 py-3 whitespace-nowrap tabular-nums">{{ evento.start_time|date:"d/m/Y" }}</td>
+                <td class="px-5 py-3 whitespace-nowrap tabular-nums">
+                    {% if evento.start_time|date:"H:i" == "00:00" and evento.end_time|date:"H:i" == "00:00" %}
+                        Tutto il giorno
+                    {% else %}
+                        {{ evento.start_time|date:"H:i" }}–{{ evento.end_time|date:"H:i" }}
+                    {% endif %}
+                </td>
+                {% if categoria %}
+                <td class="px-5 py-3">
+                    <span class="inline-block rounded-full bg-bosco-chiaro px-3 py-1 text-sm font-medium whitespace-nowrap text-bosco-scuro">{{ evento.get_category_display }}</span>
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

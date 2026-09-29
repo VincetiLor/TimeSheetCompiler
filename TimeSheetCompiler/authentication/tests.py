@@ -32,9 +32,8 @@ SHIB_HEADERS = {
 
 
 def _create_google_app():
-    """The /auth/ template calls {% provider_login_url 'google' %}, which
-    raises SocialApp.DoesNotExist without a configured app row, so every test
-    that renders that page needs one.
+    """get_token_valido reads the Google SocialApp to refresh tokens, so the
+    tests that exercise it need a configured app row.
     """
     app = SocialApp.objects.create(
         provider='google', name='google', client_id='cid', secret='secret')
@@ -44,7 +43,7 @@ def _create_google_app():
 
 @override_settings(SHIBBOLETH_DEV_MODE=False)
 class ShibbolethMiddlewareTests(TestCase):
-    """Exercises the middleware through the real stack (/auth/), because
+    """Exercises the middleware through the real stack (/index/), because
     django_login needs a session and the middleware is declared in MIDDLEWARE.
     """
 
@@ -52,7 +51,7 @@ class ShibbolethMiddlewareTests(TestCase):
         _create_google_app()
 
     def test_provisions_user_and_docente_on_first_hit(self):
-        response = self.client.get('/auth/', headers=SHIB_HEADERS)
+        response = self.client.get('/index/', headers=SHIB_HEADERS)
 
         self.assertEqual(response.status_code, 200)
         docente = Docente.objects.get(id_unimore=4242)
@@ -62,38 +61,38 @@ class ShibbolethMiddlewareTests(TestCase):
         self.assertTrue(response.wsgi_request.user.is_authenticated)
 
     def test_second_hit_reuses_existing_docente(self):
-        self.client.get('/auth/', headers=SHIB_HEADERS)
+        self.client.get('/index/', headers=SHIB_HEADERS)
         self.client.logout()
-        self.client.get('/auth/', headers=SHIB_HEADERS)
+        self.client.get('/index/', headers=SHIB_HEADERS)
 
         self.assertEqual(User.objects.filter(username='shib-4242').count(), 1)
         self.assertEqual(Docente.objects.filter(id_unimore=4242).count(), 1)
 
     def test_name_change_is_synced_on_existing_docente(self):
-        self.client.get('/auth/', headers=SHIB_HEADERS)
+        self.client.get('/index/', headers=SHIB_HEADERS)
         self.client.logout()
 
-        self.client.get('/auth/', headers={**SHIB_HEADERS, 'shib-sn': 'Bianchi'})
+        self.client.get('/index/', headers={**SHIB_HEADERS, 'shib-sn': 'Bianchi'})
 
         docente = Docente.objects.get(id_unimore=4242)
         self.assertEqual(docente.cognome, 'Bianchi')
 
     def test_no_headers_passes_through_anonymous(self):
-        response = self.client.get('/auth/')
+        response = self.client.get('/index/')
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.wsgi_request.user.is_authenticated)
         self.assertEqual(Docente.objects.count(), 0)
 
     def test_partial_headers_provision_nothing(self):
-        response = self.client.get('/auth/', headers={'shib-unique-id': '4242'})
+        response = self.client.get('/index/', headers={'shib-unique-id': '4242'})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Docente.objects.count(), 0)
 
     def test_non_numeric_id_provisions_nothing_but_serves_request(self):
         response = self.client.get(
-            '/auth/', headers={**SHIB_HEADERS, 'shib-unique-id': 'not-a-number'})
+            '/index/', headers={**SHIB_HEADERS, 'shib-unique-id': 'not-a-number'})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Docente.objects.count(), 0)
@@ -103,7 +102,7 @@ class ShibbolethMiddlewareTests(TestCase):
         user = User.objects.create_user(username='local', password='pw')
         self.client.force_login(user)
 
-        self.client.get('/auth/', headers=SHIB_HEADERS)
+        self.client.get('/index/', headers=SHIB_HEADERS)
 
         self.assertEqual(Docente.objects.count(), 0)
         self.assertEqual(User.objects.count(), 1)
@@ -127,7 +126,7 @@ class ShibbolethDevModeTests(TestCase):
         _create_google_app()
 
     def test_dev_headers_are_used_when_none_are_present(self):
-        self.client.get('/auth/')
+        self.client.get('/index/')
 
         docente = Docente.objects.get(id_unimore=1)
         self.assertEqual(docente.nome, 'Dev')
@@ -139,16 +138,41 @@ class ShibbolethDevModeTests(TestCase):
         A partially-configured SP would silently log everyone in as the same
         dev identity. Pinned here so the merge order cannot change unnoticed.
         """
-        self.client.get('/auth/', headers={'shib-unique-id': '999'})
+        self.client.get('/index/', headers={'shib-unique-id': '999'})
 
         self.assertFalse(Docente.objects.filter(id_unimore=999).exists())
         self.assertTrue(Docente.objects.filter(id_unimore=1).exists())
 
     def test_complete_real_headers_win_over_dev_headers(self):
-        self.client.get('/auth/', headers=SHIB_HEADERS)
+        self.client.get('/index/', headers=SHIB_HEADERS)
 
         self.assertTrue(Docente.objects.filter(id_unimore=4242).exists())
         self.assertFalse(Docente.objects.filter(id_unimore=1).exists())
+
+
+@override_settings(SHIBBOLETH_DEV_MODE=False)
+class AvviaLoginGoogleTests(TestCase):
+    """The page auto-submits a POST to allauth's provider login URL, which is
+    what actually starts the OAuth handshake (a GET would stop on allauth's
+    confirmation page). The handshake itself is not tested.
+    """
+
+    def setUp(self):
+        _create_google_app()
+
+    def test_form_posts_to_allauth_with_next(self):
+        response = self.client.get(
+            '/auth/avvia-login-google/', {'next': '/calendars/'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'method="post"')
+        self.assertContains(response, 'action="/accounts/google/login/')
+        self.assertContains(response, 'name="next" value="/calendars/"')
+
+    def test_missing_next_falls_back_to_home(self):
+        response = self.client.get('/auth/avvia-login-google/')
+
+        self.assertContains(response, 'name="next" value="/index/"')
 
 
 class GetTokenValidoTests(TestCase):

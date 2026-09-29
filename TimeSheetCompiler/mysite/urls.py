@@ -19,7 +19,8 @@ from django.urls import include, path
 
 urlpatterns = [
     path('hooks/', include('hooks.urls')),
-    path('auth/', include('authentication.urls')),
+    # Senza prefisso: /index/ (home) e /auth/avvia-login-google/.
+    path('', include('authentication.urls')),
     path('accounts/', include('allauth.urls')),
     # Senza prefisso: classificationpipeline.urls porta i propri
     # (/calendars/ e /events/), vedi il commento in quel file.

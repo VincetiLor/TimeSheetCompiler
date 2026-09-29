@@ -1,28 +1,81 @@
 {% extends "index.html" %}
 
-{% block titolo %}Auth{% endblock %}
+{% block titolo %}Timesheet Compiler{% endblock %}
 
 {% block content %}
-    <div class="card-body absolute right-10 top-10 max-w-md p-6 bg-white rounded-lg hover:shadow-lg transition-shadow duration-300 hover:-translate-y-0.5">
+<section class="max-w-2xl">
+    <h1 class="font-serif text-4xl leading-tight text-inchiostro sm:text-6xl sm:leading-[1.05]">
+        Il timesheet si compila dal tuo calendario.
+    </h1>
+    <p class="mt-6 max-w-xl text-lg leading-relaxed">
+        Timesheet Compiler legge gli eventi del tuo Google Calendar, li classifica
+        con le regole che imposti tu e li prepara per il timesheet di ateneo.
+    </p>
+</section>
 
-    <!-- <form method="post">
-        {% csrf_token %}
-        {{ form.as_p }}
-        <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Login</button>
-    </form> -->
+{% comment %}
+Due colonne con ruoli diversi. A sinistra il percorso, che e' una sequenza
+reale (regole, calendari, compilazione): numerato, in verticale, con la linea
+verde che collega i passi e si traccia una volta sola al caricamento.
+A destra, alla stessa altezza, le funzioni che non fanno parte del percorso:
+card come quelle dei passi ma senza numeri, cosi' non si leggono come un passo 4.
+Il Google login non parte da qui: lo avviano le pagine che hanno bisogno del
+token (vedi SelectCalendarsView).
+{% endcomment %}
+<div class="mt-16 grid items-start gap-16 sm:mt-24 md:grid-cols-2 md:gap-10">
 
-    {% load socialaccount %}
+    <section aria-labelledby="percorso">
+        <h2 id="percorso" class="font-serif text-2xl text-inchiostro">Come si procede</h2>
 
-    {% if not user.is_authenticated %}
-    <a href="{% provider_login_url 'google' next=request.path %}" class="btn btn-outline gap-2 ">
-        <svg viewBox="0 0 24 24" width="20" height="20">
-            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/>
-            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-        </svg>
-    Accedi con Google
-    </a>
-    {% endif %} 
-    </div>
+        <ol class="mt-6">
+            <li class="relative flex gap-4 pb-4">
+                <span aria-hidden="true" class="absolute top-10 bottom-0 left-5 w-px origin-top bg-bosco motion-safe:animate-traccia-v"></span>
+                <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-bosco font-serif text-lg text-carta">1</span>
+                <a href="{% url 'settings' %}" class="group flex flex-1 flex-col rounded-md border border-linea bg-carta px-5 py-4 transition-colors hover:border-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                    <h3 class="font-serif text-xl text-inchiostro group-hover:text-bosco-scuro">Regole di classificazione</h3>
+                    <p class="mt-1">Configura le parole chiave che classificano gli eventi in automatico.</p>
+                    <span class="mt-3 self-start text-sm font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 group-hover:decoration-bosco">Imposta le regole</span>
+                </a>
+            </li>
+
+            <li class="relative flex gap-4 pb-4">
+                <span aria-hidden="true" class="absolute top-10 bottom-0 left-5 w-px origin-top bg-bosco motion-safe:animate-traccia-v motion-safe:[animation-delay:600ms]"></span>
+                <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-bosco font-serif text-lg text-carta">2</span>
+                <a href="{% url 'classificationpipeline:eventi_calendars' %}" class="group flex flex-1 flex-col rounded-md border border-linea bg-carta px-5 py-4 transition-colors hover:border-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                    <h3 class="font-serif text-xl text-inchiostro group-hover:text-bosco-scuro">Calendari</h3>
+                    <p class="mt-1">Seleziona i Google Calendar da cui leggere gli eventi del mese.</p>
+                    <span class="mt-3 self-start text-sm font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 group-hover:decoration-bosco">Scegli i calendari</span>
+                </a>
+            </li>
+
+            {# Compilazione (Selenium) non ancora implementata: passo visibile ma non cliccabile. #}
+            <li class="relative flex gap-4">
+                <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full border border-bosco bg-fondo font-serif text-lg text-bosco">3</span>
+                <div aria-disabled="true" class="flex flex-1 flex-col rounded-md border border-dashed border-linea px-5 py-4">
+                    <h3 class="font-serif text-xl text-inchiostro/60">Compila il timesheet</h3>
+                    <p class="mt-1">Inserisce nel timesheet gli eventi classificati.</p>
+                    <span class="mt-3 self-start text-sm font-medium">Non ancora disponibile</span>
+                </div>
+            </li>
+        </ol>
+    </section>
+
+    <section aria-labelledby="altro">
+        <h2 id="altro" class="font-serif text-2xl text-inchiostro">Altre funzioni</h2>
+
+        {# Pagine non ancora esistenti: card visibili ma non cliccabili. #}
+        <ul class="mt-6 space-y-4">
+            <li aria-disabled="true" class="flex flex-col rounded-md border border-dashed border-linea px-5 py-4">
+                <h3 class="font-serif text-xl text-inchiostro/60">Eventi del mese</h3>
+                <p class="mt-1">Gli eventi di questo mese e il loro stato.</p>
+                <span class="mt-3 self-start text-sm font-medium">Non ancora disponibile</span>
+            </li>
+            <li aria-disabled="true" class="flex flex-col rounded-md border border-dashed border-linea px-5 py-4">
+                <h3 class="font-serif text-xl text-inchiostro/60">Ultime compilazioni</h3>
+                <p class="mt-1">I timesheet già inviati e gli eventi che contenevano.</p>
+                <span class="mt-3 self-start text-sm font-medium">Non ancora disponibile</span>
+            </li>
+        </ul>
+    </section>
+</div>
 {% endblock %}

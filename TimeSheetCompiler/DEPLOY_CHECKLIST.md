@@ -35,6 +35,7 @@ Aggiornare questo file ogni volta che si introduce una nuova scorciatoia dev-onl
 - **Bypass Shibboleth** (`authentication/middleware.py`): se il container Shib non è ancora deployato in prod all'attivazione del sito, l'app resta comunque **non bloccante** senza header (nessun login forzato) — corretto per design, ma va verificato che in prod il container sia effettivamente davanti a tutte le rotte previste, altrimenti nessun utente riesce mai ad autenticarsi.
 - **`requests.*` senza `timeout`** (`classificationpipeline/views.py`, `SelectCalendarsView`) — richieste verso Google API senza timeout, rischio DoS applicativo (worker bloccati). Aggiungere `timeout=(5, 10)` prima del deploy.
 - **`except:` nudo** (`classificationpipeline/views.py`, `hooks/views.py`) — nasconde errori reali dietro redirect silenziosi, va sostituito con eccezioni specifiche prima che diventi difficile diagnosticare problemi in prod.
+- **Font da Google Fonts** (`templates/index.html`, Newsreader e Hanken Grotesk) — ogni pagina fa una richiesta a `fonts.googleapis.com`, che riceve l'IP del visitatore. Per un servizio di ateneo è un trasferimento di dati personali a terzi (GDPR). Prima del deploy scaricare i `.woff2`, metterli in `static/fonts/`, dichiararli con `@font-face` in `tailwind/input.css` e togliere i `<link>` a Google.
 
 ## PostgreSQL — punti aperti dopo la migrazione
 

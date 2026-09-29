@@ -1,0 +1,16 @@
+{% comment %}
+Una riga della scelta calendari. Usata sia per la prima riga sia per il
+<template> da clonare, cosi' le due non divergono. Tutti i select hanno lo
+stesso name: event_compare li legge con request.POST.getlist('calendars').
+{% endcomment %}
+<div class="riga-calendario flex gap-2 px-5 py-4">
+    <select name="calendars" aria-label="Calendario" class="campo">
+        <option value="">Scegli un calendario</option>
+        {% for calendar, id in calendars.items %}
+        <option value="{{ id }}">{{ calendar }}</option>
+        {% endfor %}
+    </select>
+    <button type="button" data-rimuovi aria-label="Rimuovi questo calendario" title="Rimuovi questo calendario" class="flex size-11 shrink-0 items-center justify-center rounded-md text-grigio transition-colors hover:bg-linea/70 hover:text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" class="size-4"><path d="M5 5l10 10M15 5L5 15"/></svg>
+    </button>
+</div>

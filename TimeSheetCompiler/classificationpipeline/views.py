@@ -17,6 +17,13 @@ from authentication.services import get_token_valido
 # il worker Django a tempo indeterminato.
 GOOGLE_API_TIMEOUT = (5, 10)
 
+# Nomi dei mesi scritti qui e non con il filtro |date:"F": LANGUAGE_CODE e'
+# 'en-us' e il filtro darebbe "September".
+MESI = [
+    'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
+    'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
+]
+
 
 class SelectCalendarsView(LoginRequiredMixin, TemplateView):
     template_name = 'classificationpipeline/eventi_calendars.html'
@@ -164,6 +171,7 @@ def event_compare(request):
 
         return render(request, 'classificationpipeline/event_compare.html', {
             'calendar_ids': calendar_ids,
+            'mese': f"{MESI[first_of_this_month.month - 1]} {first_of_this_month.year}",
             'eventi_classificati': eventi.filter(status=Event.Status.CLASSIFICATO),
             'eventi_incerti': eventi.filter(status=Event.Status.INCERTO),
         })

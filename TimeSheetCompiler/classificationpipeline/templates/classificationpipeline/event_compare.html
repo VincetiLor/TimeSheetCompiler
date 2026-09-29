@@ -1,82 +1,76 @@
 {% extends 'index.html' %}
 
-{% block titolo %}Confronto Eventi{% endblock %}
+{% block titolo %}Eventi di {{ mese }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-xl font-bold mb-6 text-center mt-10">Confronto Eventi</h2>
+<div class="max-w-4xl">
+    <a href="{% url 'classificationpipeline:eventi_calendars' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
+        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4"><path d="M16 10H4M9 5l-5 5 5 5"/></svg>
+        Torna ai calendari
+    </a>
 
-    <div class="bg-white p-6 rounded-lg shadow-md w-11/12 max-w-4xl mb-10">
+    <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Eventi di {{ mese }}</h1>
+    <p class="mt-4 max-w-xl text-lg leading-relaxed">
+        Gli eventi dei calendari che hai scelto, confrontati con le tue regole.
+        Quelli classificati andranno nel timesheet; quelli incerti non contengono
+        nessuna delle tue parole chiave.
+    </p>
 
-        <h3 class="text-lg font-semibold mb-4">
-            Eventi classificati ({{ eventi_classificati|length }})
-        </h3>
+    {% comment %}
+    Stesso riquadro delle pagine regole e calendari. I due gruppi hanno pesi
+    diversi: i classificati sono il risultato, gli incerti sono cio' che resta
+    da sistemare, quindi hanno un riquadro tratteggiato come le funzioni non
+    ancora pronte della home e un rimando alle regole.
+    {% endcomment %}
+    <section aria-labelledby="classificati" class="mt-12">
+        <h2 id="classificati" class="font-serif text-2xl text-inchiostro">
+            Classificati <span class="text-grigio">({{ eventi_classificati|length }})</span>
+        </h2>
 
-        {% if eventi_classificati %}
-            <table class="w-full text-left text-sm">
-                <thead class="border-b border-gray-300">
-                    <tr>
-                        <th class="py-2">Evento</th>
-                        <th class="py-2">Calendario</th>
-                        <th class="py-2">Data</th>
-                        <th class="py-2">Orario</th>
-                        <th class="py-2">Categoria</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for evento in eventi_classificati %}
-                        <tr class="border-b border-gray-100">
-                            <td class="py-2">{{ evento.title|default:"(senza titolo)" }}</td>
-                            <td class="py-2 text-gray-500">{{ evento.calendar.title }}</td>
-                            <td class="py-2">{{ evento.start_time|date:"d/m/Y" }}</td>
-                            <td class="py-2">
-                                {{ evento.start_time|date:"H:i" }}–{{ evento.end_time|date:"H:i" }}
-                            </td>
-                            <td class="py-2">
-                                <span class="px-2 py-1 rounded bg-green-100 text-green-800">
-                                    {{ evento.get_category_display }}
-                                </span>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        {% else %}
-            <p class="text-gray-500">
-                Nessun evento classificato: nessuna delle keyword configurate
-                corrisponde ai titoli di questo periodo.
-            </p>
-        {% endif %}
+        <div class="mt-4 rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
+            {% if eventi_classificati %}
+                {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_classificati categoria=True %}
+            {% else %}
+                <p class="px-5 py-8 text-center">
+                    Nessun evento classificato: nessuna parola chiave compare nei titoli di questo mese.
+                </p>
+            {% endif %}
+        </div>
+    </section>
 
-        <h3 class="text-lg font-semibold mb-4 mt-8">
-            Eventi incerti ({{ eventi_incerti|length }})
-        </h3>
+    <section aria-labelledby="incerti" class="mt-12">
+        <h2 id="incerti" class="font-serif text-2xl text-inchiostro">
+            Incerti <span class="text-grigio">({{ eventi_incerti|length }})</span>
+        </h2>
 
         {% if eventi_incerti %}
-            <table class="w-full text-left text-sm">
-                <thead class="border-b border-gray-300">
-                    <tr>
-                        <th class="py-2">Evento</th>
-                        <th class="py-2">Calendario</th>
-                        <th class="py-2">Data</th>
-                        <th class="py-2">Orario</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for evento in eventi_incerti %}
-                        <tr class="border-b border-gray-100">
-                            <td class="py-2">{{ evento.title|default:"(senza titolo)" }}</td>
-                            <td class="py-2 text-gray-500">{{ evento.calendar.title }}</td>
-                            <td class="py-2">{{ evento.start_time|date:"d/m/Y" }}</td>
-                            <td class="py-2">
-                                {{ evento.start_time|date:"H:i" }}–{{ evento.end_time|date:"H:i" }}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        {% else %}
-            <p class="text-gray-500">Nessun evento incerto.</p>
+        <p class="mt-2 max-w-xl">
+            Per ora restano fuori dal timesheet. Per classificarli aggiungi una
+            parola chiave nelle
+            <a href="{% url 'settings' %}" class="font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 hover:decoration-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">regole di classificazione</a>
+            e rilancia la classificazione.
+        </p>
         {% endif %}
 
+        <div class="mt-4 rounded-lg border border-dashed border-linea">
+            {% if eventi_incerti %}
+                {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_incerti categoria=False %}
+            {% else %}
+                <p class="px-5 py-8 text-center">Nessun evento incerto: ogni evento del mese ha una categoria.</p>
+            {% endif %}
+        </div>
+    </section>
+
+    {% comment %}
+    La compilazione via Selenium non esiste ancora: il bottone c'e' gia' per
+    fissare il punto del flusso, ma e' disattivato. Quando esistera' diventera'
+    un form POST verso la view di compilazione, con gli stessi calendar_ids.
+    {% endcomment %}
+    <div class="mt-10 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t border-linea pt-6">
+        <p id="nota-compila" class="text-sm">La compilazione automatica non è ancora disponibile.</p>
+        <button type="button" disabled aria-describedby="nota-compila" class="h-11 rounded-md bg-bosco px-7 font-semibold text-carta disabled:cursor-not-allowed disabled:opacity-40">
+            Compila il timesheet
+        </button>
     </div>
+</div>
 {% endblock %}

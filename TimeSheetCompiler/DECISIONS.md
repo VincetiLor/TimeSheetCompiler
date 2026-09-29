@@ -510,7 +510,7 @@ non dipendere dall'ambiente.
 ```python
 # authentication/tests.py — il container SP non serve, bastano gli header
 def test_provisions_user_and_docente_on_first_hit(self):
-    response = self.client.get('/auth/', headers=SHIB_HEADERS)
+    response = self.client.get('/index/', headers=SHIB_HEADERS)
 
     docente = Docente.objects.get(id_unimore=4242)
     self.assertEqual(docente.user.username, 'shib-4242')
@@ -536,7 +536,7 @@ funzione banale.
 sembrava piu' ostico: il provisioning dipende da un SP esterno che in sviluppo
 non gira. Ma il container ha un solo compito osservabile — mettere attributi
 negli header della richiesta — e il test client di Django puo' fare esattamente
-la stessa cosa. Il test passa dallo stack reale (`/auth/`, non `RequestFactory`)
+la stessa cosa. Il test passa dallo stack reale (`/index/`, non `RequestFactory`)
 perche' `django_login` ha bisogno di una sessione vera:
 
 ```python
@@ -548,7 +548,7 @@ SHIB_HEADERS = {
 }
 
 def test_provisions_user_and_docente_on_first_hit(self):
-    response = self.client.get('/auth/', headers=SHIB_HEADERS)
+    response = self.client.get('/index/', headers=SHIB_HEADERS)
 
     self.assertEqual(response.status_code, 200)
     docente = Docente.objects.get(id_unimore=4242)
@@ -568,7 +568,7 @@ inosservato:
 ```python
 # authentication/tests.py
 def test_dev_headers_override_partially_present_real_headers(self):
-    self.client.get('/auth/', headers={'shib-unique-id': '999'})
+    self.client.get('/index/', headers={'shib-unique-id': '999'})
 
     self.assertFalse(Docente.objects.filter(id_unimore=999).exists())
     self.assertTrue(Docente.objects.filter(id_unimore=1).exists())
@@ -1254,3 +1254,362 @@ Va decisa prima della pagina "eventi non compilati" (§2.6 di `CLAUDE.md`), che
 espone il totale ore.
 
 **File**: `classificationpipeline/views.py`
+
+---
+
+## La pagina di ingresso diventa la home: niente bottone "Accedi con Google"
+
+**Data**: 2026-09-29
+
+Il template di `/auth/` mostrava il bottone Google solo agli utenti non
+autenticati:
+
+```django
+{% if not user.is_authenticated %}
+<a href="{% provider_login_url 'google' next=request.path %}">Accedi con Google</a>
+{% endif %}
+```
+
+Ma `ShibbolethAuthMiddleware` fa il login Django prima che la view venga
+eseguita, e `LOGIN_REDIRECT_URL = '/auth/'`. Nessun docente reale vedeva quindi
+il bottone, e la pagina era una card bianca vuota. Il bottone aveva anche un
+secondo problema: era un link GET, e con allauth 65 (`SOCIALACCOUNT_LOGIN_ON_GET`
+a `False` di default) un GET sull'URL del provider non porta a Google ma a una
+pagina intermedia di conferma di allauth, senza stile.
+
+**Decisione**: il bottone è stato tolto. La pagina è ora la home dell'app (spostata da `/auth/` a `/index/`, vedi la voce successiva): una
+hero che spiega a cosa serve e il percorso in tre passi (regole, calendari,
+eventi del mese), ciascuno una card che porta alla pagina corrispondente. Il
+collegamento a Google non parte più da qui ma dalla prima pagina che ha davvero
+bisogno del token:
+
+```python
+# classificationpipeline/views.py, SelectCalendarsView.get
+try:
+    self.token = get_token_valido(self.request.user)
+except:
+    return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
+```
+
+`avvia_login_google` fa una POST auto-inviata verso allauth, quindi salta la
+pagina intermedia. Per chi ha JavaScript disattivato il template ha un bottone
+dentro `<noscript>`.
+
+**Alternative scartate**:
+
+- *Correggere la condizione* in "mostra il bottone se non esiste un
+  `SocialAccount` Google". Funziona, ma chiede all'utente un'azione che l'app
+  gli chiederebbe comunque al momento giusto. Chiesta prima, è un passo in più
+  senza contesto.
+- *`SOCIALACCOUNT_LOGIN_ON_GET = True`* per rendere il link GET diretto.
+  allauth lo sconsiglia: un GET che avvia un login OAuth è esposto a CSRF.
+
+La terza card ("Eventi del mese") è già presente ma non cliccabile: la pagina
+non esiste ancora.
+
+**File**: `authentication/templates/authentication/index.html`,
+`templates/index.html`, `templates/auto_login_google.html`, `tailwind/input.css`
+
+---
+
+## La home passa da `/auth/` a `/index/`
+
+**Data**: 2026-09-29
+
+Una volta diventata la home (voce precedente), la pagina non aveva più niente a
+che fare con l'autenticazione, e `/auth/` come indirizzo della home era
+fuorviante. La home ora sta su `/index/`; `LOGIN_URL`, `LOGIN_REDIRECT_URL` e
+`LOGOUT_REDIRECT_URL` puntano lì.
+
+Il redirect verso Google invece è davvero un passo di autenticazione e resta
+sotto `/auth/`. Per avere le due rotte con prefissi diversi nella stessa app,
+`authentication.urls` è inclusa senza prefisso e porta i propri, come già fa
+`classificationpipeline.urls`:
+
+```python
+# authentication/urls.py
+urlpatterns = [
+    path("index/", views.login_view, name="index"),
+    path("auth/avvia-login-google/", views.avvia_login_google, name="avvia_login_google"),
+]
+
+# mysite/settings.py
+LOGIN_URL = '/index/'
+```
+
+I template usano già `{% url 'index' %}` e `reverse('avvia_login_google')`,
+quindi non è cambiato nulla lì. Sono cambiati solo i test che confrontano
+l'URL letterale del redirect (`'/index/?next=/events/'`).
+
+**Alternativa scartata**: la home su `/`. È l'indirizzo più naturale, ma la
+scelta di `/index/` è stata dell'utente; `/` resta libero (oggi dà 404).
+
+Proprio perché `/` dà 404, `avvia_login_google` non può più usarlo come `next`
+di ripiego: chi arrivava lì senza `next` sarebbe tornato da Google su una
+pagina inesistente. Il ripiego è ora la home:
+
+```python
+# authentication/views.py
+def avvia_login_google(request):
+    next_url = request.GET.get('next') or reverse('index')
+```
+
+`or` invece del default di `.get()` copre anche `?next=` vuoto. Due test
+(`AvviaLoginGoogleTests`) verificano che la pagina faccia la POST verso
+`/accounts/google/login/` con il `next` giusto, anche quello di ripiego.
+
+**File**: `authentication/urls.py`, `authentication/views.py`, `mysite/urls.py`,
+`mysite/settings.py`, `authentication/tests.py`, `hooks/tests.py`,
+`classificationpipeline/tests.py`
+
+---
+
+## Home: percorso a sinistra, funzioni extra a destra
+
+**Data**: 2026-09-29
+
+La home aveva tre card numerate in orizzontale: regole, calendari, eventi del
+mese. Ma "eventi del mese" non è un passo del percorso, è una pagina da
+consultare quando serve, e il vero terzo passo (compilare il timesheet) non
+compariva.
+
+**Decisione**: due colonne con ruoli diversi.
+
+- A sinistra il percorso, in verticale: regole, calendari, compilazione del
+  timesheet. È una sequenza vera, quindi tiene i numeri e la linea verde che
+  collega i passi.
+- A destra, alla stessa altezza, "Altre funzioni": eventi del mese e ultime
+  compilazioni. Sono card come quelle dei passi ma senza numeri, così non si
+  leggono come un passo 4 e 5.
+
+La linea verticale è un tratto per ogni passo tranne l'ultimo, invece di una
+linea unica: l'altezza delle card dipende dal testo, e una linea unica
+dovrebbe sapere dove sta il centro dell'ultimo cerchio. Ogni tratto va dal
+fondo del proprio cerchio al fondo del proprio `<li>`, dove comincia il
+cerchio successivo:
+
+```html
+<li class="relative flex gap-5 pb-6">
+    <span aria-hidden="true" class="absolute top-10 bottom-0 left-5 w-px origin-top bg-bosco motion-safe:animate-traccia-v"></span>
+    <span class="... size-10 rounded-full bg-bosco">1</span>
+    ...
+```
+
+Lo spazio tra i passi è `pb-6` sul `<li>` e non `gap` sull'`<ol>`: con `gap` il
+tratto si fermerebbe prima del cerchio successivo. Il secondo tratto parte con
+600 ms di ritardo, quindi la linea si disegna dall'alto verso il basso. La
+vecchia animazione orizzontale `traccia` è stata sostituita da `traccia-v`.
+
+Sotto `md` (768px) le colonne si impilano: prima il percorso, poi le funzioni extra.
+
+Il passo 3 e le due funzioni extra sono visibili ma non cliccabili, perché le
+pagine non esistono ancora.
+
+**File**: `authentication/templates/authentication/index.html`,
+`tailwind/input.css`, `static/css/app.css`
+
+---
+
+## Form delle regole: niente riga vuota, una × per riga
+
+**Data**: 2026-09-29
+
+Il formset delle regole (`hooks/views.py`) era costruito con `extra=1` e
+`can_delete=True`: ogni pagina partiva con una riga vuota in fondo e ogni riga
+aveva una checkbox "Elimina". Chi entrava solo per correggere una regola
+esistente doveva spuntare "Elimina" sulla riga vuota prima di salvare,
+altrimenti il form la rifiutava per la parola chiave mancante.
+
+**Decisione**: niente righe in più e niente checkbox. Le righe si aggiungono con
+"Aggiungi regola" e si tolgono con la × a fianco di ciascuna parola chiave.
+
+```python
+# hooks/views.py
+HookRuleFormSet = forms.formset_factory(
+      HookRuleForm, formset=BaseHookRuleFormSet, extra=0)
+```
+
+La × toglie la riga solo dalla pagina. Il DB cambia soltanto con "Salva",
+perché la view ricostruisce l'intero `Hook.config` dalle righe inviate: una
+regola la cui riga non arriva nel POST viene cancellata.
+
+Togliere una riga in mezzo lascia però un buco negli indici `form-N-*`, e
+Django legge le righe da 0 a `TOTAL_FORMS - 1`: quelle oltre il buco
+andrebbero perse. Dopo ogni rimozione il JS rinumera quindi `name`, `id` e
+`for` di tutte le righe:
+
+```js
+// hooks/templates/hooks/settings.html
+function rinumera() {
+    Array.from(corpo.children).forEach(function (riga, i) {
+        riga.querySelectorAll('[name], [id], [for]').forEach(function (el) {
+            ['name', 'id', 'for'].forEach(function (attr) {
+                const v = el.getAttribute(attr);
+                if (v) el.setAttribute(attr, v.replace(/form-\d+-/, 'form-' + i + '-'));
+            });
+        });
+    });
+    totale.value = corpo.children.length;
+}
+```
+
+Anche `INITIAL_FORMS` va abbassato quando si toglie una riga già salvata. Le
+righe già salvate stanno sempre in cima, perché quelle nuove si aggiungono in
+fondo. Basta quindi confrontare la posizione della riga tolta con il
+contatore: se è più bassa, la riga era salvata e il contatore cala di uno.
+
+**Alternative scartate**:
+
+- *Tenere `can_delete` e nascondere la checkbox dietro la ×*. Evita la
+  rinumerazione, ma lascia nel POST righe marcate da escludere in `clean()` e
+  in `form_valid()`. E una riga nuova e vuota marcata come eliminata verrebbe
+  comunque validata.
+- *Un solo bottone "Elimina ultima"*. È stata la prima versione: niente
+  rinumerazione, ma per togliere una regola in mezzo bisognava togliere tutte
+  quelle sotto. L'utente l'ha scartata.
+- *`extra=1` solo quando non ci sono regole*. Ripropone lo stesso problema al
+  primo salvataggio, e la pagina vuota ha già un messaggio che indica il
+  bottone da usare.
+
+Un POST che contiene ancora `DELETE` (una pagina vecchia rimasta aperta) viene
+ignorato: senza `can_delete` il campo non esiste, e la riga viene salvata. Un
+test lo verifica (`test_a_delete_flag_is_ignored`).
+
+La riga esiste una sola volta, in `hooks/_riga.html`. La includono sia il ciclo
+sulle righe esistenti sia il `<template>` da clonare, così le due non possono
+divergere.
+
+**Stile**: i widget dei form sono generati in Python, e Tailwind non legge i
+file `.py`, quindi non vede le utility scritte lì. I widget ricevono una sola
+classe, `campo`, definita con `@apply` in `tailwind/input.css`:
+
+```python
+keyword = forms.CharField(
+    max_length=100,
+    widget=forms.TextInput(attrs={'class': 'campo', 'placeholder': 'es. lezione'}))
+```
+
+Il riquadro delle regole non è bianco ma `superficie` (`#f6f7f6`), un grigio
+appena più chiaro del fondo pagina, con un'ombra leggera tinta di verde. Così
+ci sono tre livelli distinti: pagina, riquadro, campi bianchi. Prima c'erano
+tre bianchi uguali separati solo da filetti. Le colonne categoria e parola
+chiave hanno proporzione 2:3: la categoria è una scelta fra tre voci corte, la
+parola chiave è testo libero.
+
+**File**: `hooks/views.py`, `hooks/templates/hooks/settings.html`,
+`hooks/templates/hooks/_riga.html`, `hooks/tests.py`, `tailwind/input.css`,
+`static/css/app.css`
+
+---
+
+## Pagina calendari: stesso schema del form delle regole
+
+**Data**: 2026-09-29
+
+La pagina di scelta dei calendari aveva un gradiente viola-blu, i bottoni
+"Aggiungi" e "Rimuovi" (che toglieva l'ultimo) e gli `alert()` del browser per
+gli errori. È stata allineata alla pagina delle regole: stesso riquadro grigio
+`superficie`, una × per riga, "Aggiungi calendario" in basso a sinistra e
+"Classifica gli eventi" in basso a destra. Gli errori compaiono in un riquadro
+sopra il form invece che in un `alert()`.
+
+Rispetto alle regole ci sono due differenze.
+
+- **Nessun formset, quindi nessuna rinumerazione.** Tutti i select hanno lo
+  stesso `name` e `event_compare` li legge come lista. Una riga tolta in mezzo
+  non lascia buchi, e la × non deve toccare altri attributi.
+
+  ```python
+  # classificationpipeline/views.py, event_compare
+  calendar_ids = request.POST.getlist('calendars')
+  ```
+
+- **Si parte con una riga già presente.** Nelle regole la riga vuota era un
+  ostacolo, perché chi entra spesso vuole solo modificare. Qui chi entra deve
+  scegliere almeno un calendario, altrimenti non c'è niente da classificare.
+
+"Aggiungi calendario" si disattiva a 3 righe, o prima se l'account ha meno
+calendari. Un calendario già scelto in una riga è disattivato nelle altre:
+
+```js
+// classificationpipeline/templates/classificationpipeline/eventi_calendars.html
+aggiungi.disabled = n >= Math.min(MASSIMO, disponibili);
+```
+
+Il limite di 3 è solo lato client. Serve perché ogni calendario è una chiamata
+sincrona a Google dentro la stessa richiesta. Un limite lato server avrà senso
+quando la lettura dei calendari diventerà asincrona (vedi `CLAUDE.md` §4
+punto 20).
+
+Se Google non restituisce calendari, il form non viene mostrato e al suo posto
+c'è un messaggio: un menu senza voci non serve a niente.
+
+La riga sta in `_riga_calendario.html` ed è inclusa sia come prima riga sia nel
+`<template>` da clonare. Un test verifica che entrambe usino `name="calendars"`:
+se il `<template>` avesse un altro nome, i calendari aggiunti verrebbero persi
+senza errori.
+
+**File**: `classificationpipeline/templates/classificationpipeline/eventi_calendars.html`,
+`classificationpipeline/templates/classificationpipeline/_riga_calendario.html`,
+`classificationpipeline/tests.py`
+
+---
+
+## Pagina eventi del mese: intestazione, "giornata intera" e bottone di compilazione
+
+**Data**: 2026-09-29
+
+La pagina che mostra il risultato di `event_compare` usava ancora i grigi e i
+verdi di default di Tailwind e aveva come titolo "Confronto Eventi". È stata
+allineata alle altre pagine: "Torna ai calendari" in alto, titolo con il mese
+("Eventi di settembre 2026"), una breve introduzione e le tabelle nello stesso
+riquadro `superficie` delle pagine regole e calendari.
+
+**Nome del mese**: `LANGUAGE_CODE` è `en-us`, quindi `|date:"F"` darebbe
+"September". Il nome arriva dalla view, da una lista italiana:
+
+```python
+# classificationpipeline/views.py
+MESI = [
+    'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
+    'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
+]
+...
+'mese': f"{MESI[first_of_this_month.month - 1]} {first_of_this_month.year}",
+```
+
+Passare a `LANGUAGE_CODE = 'it'` sarebbe la soluzione generale, ma cambia anche
+i messaggi dell'admin e di allauth. Va deciso a parte.
+
+**Eventi "giornata intera"**: `parse_google_datetime` li salva come mezzanotte
+→ mezzanotte, e la tabella li mostrava come "00:00–00:00", che sembra un
+errore. Ora compaiono come "Tutto il giorno":
+
+```django
+{% if evento.start_time|date:"H:i" == "00:00" and evento.end_time|date:"H:i" == "00:00" %}
+    Tutto il giorno
+{% else %}
+    {{ evento.start_time|date:"H:i" }}–{{ evento.end_time|date:"H:i" }}
+{% endif %}
+```
+
+Il controllo guarda l'orario, non una colonna dedicata. Un evento con orario
+che va davvero da mezzanotte a mezzanotte comparirebbe come "Tutto il giorno",
+che per quell'evento è comunque vero.
+
+**Classificati e incerti hanno pesi diversi**: i classificati stanno nel
+riquadro pieno, perché sono il risultato. Gli incerti stanno in un riquadro
+tratteggiato, lo stesso segno usato in home per ciò che non è ancora pronto,
+con un rimando alle regole. La tabella è una sola (`_tabella_eventi.html`),
+con la colonna Categoria attivabile, e scorre in orizzontale sugli schermi
+stretti.
+
+**Bottone "Compila il timesheet"**: c'è già, in basso a destra come le azioni
+principali delle altre pagine, ma è disattivato, con accanto la nota che la
+compilazione non è ancora disponibile. Quando esisterà la view di
+compilazione (Selenium) diventerà un form POST con gli stessi `calendar_ids`.
+
+**File**: `classificationpipeline/views.py`,
+`classificationpipeline/templates/classificationpipeline/event_compare.html`,
+`classificationpipeline/templates/classificationpipeline/_tabella_eventi.html`,
+`classificationpipeline/tests.py`

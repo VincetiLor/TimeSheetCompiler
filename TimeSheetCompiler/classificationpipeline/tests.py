@@ -19,6 +19,7 @@ from django.utils import timezone
 
 from authentication.models import Docente
 from classificationpipeline.models import Calendar, Event, expiry_cutoff
+from classificationpipeline.views import MESI
 
 
 def _with_category(kwargs):
@@ -106,7 +107,7 @@ class EventCompareTests(TestCase):
         response = self.client.get('/events/')
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/auth/?next=/events/')
+        self.assertEqual(response.url, '/index/?next=/events/')
 
     @mock.patch('classificationpipeline.views.requests.get')
     @mock.patch('classificationpipeline.views.get_token_valido')
@@ -115,7 +116,7 @@ class EventCompareTests(TestCase):
         response = self.client.post('/events/', {'calendars': [self.CAL_A]})
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/auth/?next=/events/')
+        self.assertEqual(response.url, '/index/?next=/events/')
         mock_token.assert_not_called()
         mock_get.assert_not_called()
 
@@ -220,6 +221,24 @@ class EventCompareTests(TestCase):
         self.assertEqual(
             {e.event_id for e in response.context['eventi_incerti']},
             {'ev-riunione', 'ev-convegno'})
+
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_page_names_the_month_in_italian_and_shows_all_day_events(
+            self, mock_token, mock_get):
+        """LANGUAGE_CODE is en-us, so |date:"F" would say "September": the
+        month name comes from the view. All-day events are stored as
+        midnight-to-midnight and must not render as 00:00-00:00.
+        """
+        mock_get.return_value = self._google_response(self._events_payload())
+        self.client.force_login(self.user)
+
+        response = self.client.post('/events/', {'calendars': [self.CAL_A]})
+
+        now = timezone.localtime()
+        self.assertEqual(response.context['mese'], f'{MESI[now.month - 1]} {now.year}')
+        self.assertContains(response, 'Tutto il giorno')
+        self.assertNotContains(response, '00:00–00:00')
 
     @mock.patch('classificationpipeline.views.requests.get')
     @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
@@ -742,6 +761,24 @@ class SelectCalendarsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context['calendars'], {})
+        self.assertContains(response, 'non ha calendari da leggere')
+        self.assertNotContains(response, 'name="calendars"')
+
+    @mock.patch('classificationpipeline.views.requests.get')
+    @mock.patch('classificationpipeline.views.get_token_valido', return_value='access-token')
+    def test_every_row_posts_under_the_name_event_compare_reads(
+            self, mock_token, mock_get):
+        """event_compare reads request.POST.getlist('calendars'): the visible
+        row and the <template> cloned by "Aggiungi calendario" must both use
+        that name, or the added calendars would be silently dropped.
+        """
+        mock_get.return_value = self._google_response(CALENDAR_LIST_PAYLOAD)
+        self.client.force_login(self.user)
+
+        response = self.client.get('/calendars/')
+
+        self.assertContains(response, 'name="calendars"', count=2)
+        self.assertContains(response, 'action="/events/"')
 
     @mock.patch('classificationpipeline.views.get_token_valido', side_effect=Exception('no token'))
     def test_missing_google_token_redirects_to_google_login(self, mock_token):
@@ -759,6 +796,6 @@ class SelectCalendarsViewTests(TestCase):
         response = self.client.get('/calendars/')
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/auth/?next=/calendars/')
+        self.assertEqual(response.url, '/index/?next=/calendars/')
         mock_token.assert_not_called()
         mock_get.assert_not_called()

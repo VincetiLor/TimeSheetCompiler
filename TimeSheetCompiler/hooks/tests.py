@@ -59,7 +59,7 @@ class HookSettingsTests(TestCase):
         response = self.client.get('/hooks/')
 
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response.url.startswith('/auth/'))
+        self.assertTrue(response.url.startswith('/index/'))
         # The hook row already exists: it is created by the post_save signal on
         # Docente, not by this view. What matters here is that the anonymous
         # request left it untouched.
@@ -81,16 +81,43 @@ class HookSettingsTests(TestCase):
 
         self.assertEqual(Hook.objects.filter(docente=self.docente).count(), 1)
 
-    def test_an_empty_form_is_always_offered(self):
-        """There is no other way to add the first rule: with no extra form the
-        settings page of a docente who never configured anything would have
-        nothing to fill in.
+    def test_no_blank_row_is_offered(self):
+        """A blank row would have to be filled or removed before every save,
+        even by a docente who only came to edit existing rules. New rows are
+        added on demand by the page's "Aggiungi regola" button instead.
         """
+        Hook.objects.filter(docente=self.docente).update(
+            config={'didattica': ['lezione']})
         self.client.force_login(self.user)
 
         response = self.client.get('/hooks/')
 
         self.assertEqual(len(response.context['form'].forms), 1)
+        self.assertEqual(response.context['form'].forms[0].initial,
+                         {'category': 'didattica', 'keyword': 'lezione'})
+
+    def test_first_visit_shows_no_rows(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get('/hooks/')
+
+        self.assertEqual(len(response.context['form'].forms), 0)
+        self.assertContains(response, 'Nessuna regola')
+
+    def test_editing_existing_rules_saves_without_touching_anything_else(self):
+        """The case the old blank extra row broke: change one saved keyword
+        and submit, with no new row to fill or delete.
+        """
+        Hook.objects.filter(docente=self.docente).update(
+            config={'didattica': ['lezione']})
+        self.client.force_login(self.user)
+
+        response = self.client.post('/hooks/', formset_post([
+            {'category': 'didattica', 'keyword': 'esame'},
+        ], initial=1))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._config(), {'didattica': ['esame']})
 
     def test_saved_rules_come_back_as_one_row_each(self):
         """The stored shape is one category to many keywords; the form shows
@@ -150,15 +177,50 @@ class HookSettingsTests(TestCase):
 
         self.assertEqual(self._config(), {})
 
-    def test_a_deleted_row_is_not_saved(self):
+    def test_a_removed_saved_row_is_deleted(self):
+        """The row's × drops it from the page and lowers both
+        TOTAL_FORMS and INITIAL_FORMS: a saved rule removed that way simply is
+        not in the POST, and the rebuilt config no longer has it.
+        """
+        Hook.objects.filter(docente=self.docente).update(
+            config={'didattica': ['lezione', 'esame']})
+        self.client.force_login(self.user)
+
+        response = self.client.post('/hooks/', formset_post([
+            {'category': 'didattica', 'keyword': 'lezione'},
+        ], initial=1))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._config(), {'didattica': ['lezione']})
+
+    def test_a_saved_row_removed_from_the_middle_is_deleted(self):
+        """The row's × removes it from the page and renumbers the rows below,
+        so the POST is contiguous again and one row shorter, with
+        INITIAL_FORMS lowered by one.
+        """
+        Hook.objects.filter(docente=self.docente).update(
+            config={'didattica': ['lezione', 'esame', 'tutorato']})
+        self.client.force_login(self.user)
+
+        response = self.client.post('/hooks/', formset_post([
+            {'category': 'didattica', 'keyword': 'lezione'},
+            {'category': 'didattica', 'keyword': 'tutorato'},
+        ], initial=2))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._config(), {'didattica': ['lezione', 'tutorato']})
+
+    def test_a_delete_flag_is_ignored(self):
+        """There is no DELETE checkbox any more: a stale page or a hand-made
+        POST that still sends one must not drop the row behind the user's back.
+        """
         self.client.force_login(self.user)
 
         self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'lezione'},
             {'category': 'didattica', 'keyword': 'esame', 'DELETE': 'on'},
         ]))
 
-        self.assertEqual(self._config(), {'didattica': ['lezione']})
+        self.assertEqual(self._config(), {'didattica': ['esame']})
 
     def test_the_same_keyword_twice_in_one_category_is_stored_once(self):
         """Two identical rows are a repetition, not two rules: they collapse
@@ -191,17 +253,17 @@ class HookSettingsTests(TestCase):
         self.assertTrue(response.context['form'].non_form_errors())
         self.assertEqual(self._config(), {'didattica': ['lezione']})
 
-    def test_a_deleted_row_does_not_collide(self):
-        """Moving a keyword from one category to another means deleting one row
-        and adding the other; if deletion were ignored the move would be
-        rejected as a collision with itself.
+    def test_moving_a_keyword_to_another_category_is_not_a_collision(self):
+        """Moving a keyword means editing the category of its row: the old
+        pairing is not in the POST any more, so it cannot collide.
         """
+        Hook.objects.filter(docente=self.docente).update(
+            config={'didattica': ['seminario']})
         self.client.force_login(self.user)
 
         response = self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'seminario', 'DELETE': 'on'},
             {'category': 'ricerca_base', 'keyword': 'seminario'},
-        ]))
+        ], initial=1))
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self._config(), {'ricerca_base': ['seminario']})
@@ -247,7 +309,7 @@ class HookSettingsTests(TestCase):
 
         response = self.client.get('/hooks/')
 
-        field = response.context['form'].forms[0].fields['category']
+        field = response.context['form'].empty_form.fields['category']
         self.assertEqual(
             [value for value, _ in field.choices if value],
             [value for value, _ in Event.Category.choices])

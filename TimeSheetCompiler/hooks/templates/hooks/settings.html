@@ -1,63 +1,127 @@
-  {% extends "index.html" %}
+{% extends "index.html" %}
 
-  {% block titolo %}Hooks Settings{% endblock %}
+{% block titolo %}Regole di classificazione{% endblock %}
 
-  {% block content %}
+{% block content %}
+<div class="max-w-3xl">
+    <a href="{% url 'index' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
+        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4"><path d="M16 10H4M9 5l-5 5 5 5"/></svg>
+        Torna alla home
+    </a>
 
-  <h1 class="text-2xl font-bold mb-4">Hooks Settings</h1>
-  <h2 class="text-xl font-semibold mb-2">Associa una categoria a ogni parola chiave</h2>
+    <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Regole di classificazione</h1>
+    <p class="mt-4 max-w-xl text-lg leading-relaxed">
+        Se il titolo di un evento contiene una parola chiave, l'evento finisce
+        nella categoria associata.
+    </p>
 
-  <form method="post">
-      {% csrf_token %}
-      {{ form.management_form }}
 
-      {% for error in form.non_form_errors %}
-          <p class="text-red-600">{{ error }}</p>
-      {% endfor %}
+    <form method="post" class="mt-10">
+        {% csrf_token %}
+        {{ form.management_form }}
 
-      <table id="regole">
-          <thead>
-              <tr><th>Categoria</th><th>Parola chiave</th><th>Elimina</th></tr>
-          </thead>
-          <tbody id="corpo-regole">
-          {% for riga in form %}
-              <tr>
-                  <td>{{ riga.category }}{{ riga.category.errors }}</td>
-                  <td>{{ riga.keyword }}{{ riga.keyword.errors }}</td>
-                  <td>{{ riga.DELETE }}</td>
-              </tr>
-          {% endfor %}
-          </tbody>
-      </table>
+        {% if form.non_form_errors %}
+        <div role="alert" class="mb-6 rounded-md border border-red-300 bg-red-50 px-5 py-4 text-red-800">
+            {% for error in form.non_form_errors %}<p>{{ error }}</p>{% endfor %}
+        </div>
+        {% endif %}
 
-      <button type="button" id="aggiungi-regola">Aggiungi regola</button>
-      <button type="submit">Salva</button>
-  </form>
+        {% comment %}
+        Il riquadro e' un grigio appena piu' chiaro del fondo pagina, con i campi
+        bianchi sopra: i campi si staccano dal riquadro e il riquadro dalla
+        pagina, invece di tre bianchi uguali separati solo da filetti.
+        Colonne 2:3: la categoria e' una scelta fra poche voci corte, la parola
+        chiave e' testo libero. Su schermi stretti le intestazioni spariscono e
+        ogni campo ha la propria etichetta per gli screen reader.
+        {% endcomment %}
+        <div class="rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
+            <div aria-hidden="true" class="hidden grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4 border-b border-linea px-5 py-3 text-sm font-semibold text-inchiostro sm:grid">
+                <span class="pl-3">Categoria</span>
+                <span class="pl-3">Parola chiave</span>
+            </div>
 
-  {# Riga vuota da clonare: __prefix__ e' il segnaposto che Django mette
-     nell'empty_form al posto dell'indice, sostituito al momento del clone. #}
-  <template id="modello-regola">
-      <tr>
-          <td>{{ form.empty_form.category }}</td>
-          <td>{{ form.empty_form.keyword }}</td>
-          <td>{{ form.empty_form.DELETE }}</td>
-      </tr>
-  </template>
+            <div id="corpo-regole" class="divide-y divide-linea">
+            {% for riga in form %}
+                {% include "hooks/_riga.html" %}
+            {% endfor %}
+            </div>
 
-  <script>
-      (function () {
-          const corpo = document.getElementById('corpo-regole');
-          const modello = document.getElementById('modello-regola');
-          const totale = document.getElementById('id_form-TOTAL_FORMS');
+            <p id="nessuna-regola" class="px-5 py-8 text-center {% if form.forms %}hidden{% endif %}">
+                Nessuna regola. Usa «Aggiungi regola» per crearne una.
+            </p>
+        </div>
 
-          document.getElementById('aggiungi-regola').addEventListener('click', function () {
-              const indice = parseInt(totale.value, 10);
-              const riga = document.createElement('tbody');
-              riga.innerHTML = modello.innerHTML.replaceAll('__prefix__', indice);
-              corpo.appendChild(riga.firstElementChild);
-              totale.value = indice + 1;
-          });
-      })();
-  </script>
+        <div class="mt-6 flex flex-wrap items-center gap-3">
+            <button type="button" id="aggiungi-regola" class="h-11 rounded-md border border-bosco bg-carta px-5 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                Aggiungi regola
+            </button>
+            <button type="submit" class="ml-auto h-11 rounded-md bg-bosco px-7 font-semibold text-carta transition-colors hover:bg-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                Salva
+            </button>
+        </div>
+    </form>
+</div>
 
-  {% endblock %}
+{% comment %}
+Riga vuota da clonare: __prefix__ e' il segnaposto che Django mette
+nell'empty_form al posto dell'indice, sostituito al momento del clone.
+{% endcomment %}
+<template id="modello-regola">
+    {% include "hooks/_riga.html" with riga=form.empty_form %}
+</template>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    (function () {
+        const corpo = document.getElementById('corpo-regole');
+        const modello = document.getElementById('modello-regola');
+        const vuoto = document.getElementById('nessuna-regola');
+        const totale = document.getElementById('id_form-TOTAL_FORMS');
+        const iniziali = document.getElementById('id_form-INITIAL_FORMS');
+
+        // Dopo una rimozione in mezzo gli indici form-N-* vanno riscritti:
+        // Django legge le righe da 0 a TOTAL_FORMS-1 e salterebbe quelle
+        // rimaste oltre il buco.
+        function rinumera() {
+            Array.from(corpo.children).forEach(function (riga, i) {
+                riga.querySelectorAll('[name], [id], [for]').forEach(function (el) {
+                    ['name', 'id', 'for'].forEach(function (attr) {
+                        const v = el.getAttribute(attr);
+                        if (v) el.setAttribute(attr, v.replace(/form-\d+-/, 'form-' + i + '-'));
+                    });
+                });
+            });
+            totale.value = corpo.children.length;
+            vuoto.classList.toggle('hidden', corpo.children.length > 0);
+        }
+
+        document.getElementById('aggiungi-regola').addEventListener('click', function () {
+            const contenitore = document.createElement('div');
+            contenitore.innerHTML = modello.innerHTML.replaceAll('__prefix__', corpo.children.length);
+            const riga = contenitore.querySelector('.riga-regola');
+            corpo.appendChild(riga);
+            rinumera();
+            riga.querySelector('input').focus();
+        });
+
+        // La riga sparisce solo dalla pagina: nel DB cambia qualcosa solo al
+        // salvataggio, perche' la view ricostruisce Hook.config dalle righe
+        // inviate. Le righe gia' salvate stanno sempre in cima (indici
+        // < INITIAL_FORMS), quindi togliendone una cala anche quel contatore.
+        corpo.addEventListener('click', function (e) {
+            const bottone = e.target.closest('[data-rimuovi]');
+            if (!bottone) return;
+            const riga = bottone.closest('.riga-regola');
+            const indice = Array.from(corpo.children).indexOf(riga);
+            if (indice < parseInt(iniziali.value, 10)) {
+                iniziali.value = parseInt(iniziali.value, 10) - 1;
+            }
+            const successiva = riga.nextElementSibling || riga.previousElementSibling;
+            riga.remove();
+            rinumera();
+            (successiva ? successiva.querySelector('[data-rimuovi]') : document.getElementById('aggiungi-regola')).focus();
+        });
+    })();
+</script>
+{% endblock %}

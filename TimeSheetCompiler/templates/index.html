@@ -3,18 +3,25 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>{% block titolo %}Il mio sito{% endblock %}</title>
-    {% block css_extra %}{% endblock %}
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block titolo %}Timesheet Compiler{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    {% block css_extra %}{% endblock %}
 </head>
-<body>
-    <div class="min-h-screen flex flex-col  relative items-center bg-gradient-to-r from-blue-500 to-purple-600">
-    <h1 class="card-title text-5xl mb-4 padding-top-10 text-bold text-center mt-10">Timesheet Compiler</h1>
-    <h3 class="card-title text-2xl mb-4 text-center mt-5"> il software per compilare timesheet in maniera semplice e veloce</h3> 
-    {% block content %}{% endblock %}
-    </div>
-    
-    {% block extra_js %}{% endblock %}
+<body class="min-h-screen bg-fondo font-sans text-grigio antialiased">
+    <header class="border-b border-linea bg-carta">
+        <div class="mx-auto flex max-w-5xl items-center px-4 py-4 sm:px-8">
+            <a href="{% url 'index' %}" class="font-serif text-xl text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">Timesheet Compiler</a>
+        </div>
+    </header>
 
+    <main class="mx-auto max-w-5xl px-4 py-12 sm:px-8 sm:py-20">
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

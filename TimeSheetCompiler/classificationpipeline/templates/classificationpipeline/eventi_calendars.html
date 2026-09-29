@@ -1,90 +1,142 @@
 {% extends 'index.html' %}
 
-{% block titolo %}Calendars{% endblock %}
+{% block titolo %}Calendari{% endblock %}
 
 {% block content %}
-    <h2 class="text-xl font-bold mb-6 text-center mt-10">Ora puoi selezionare i calendari da cui classificare gli eventi</h2>
+<div class="max-w-3xl">
+    <a href="{% url 'index' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
+        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4"><path d="M16 10H4M9 5l-5 5 5 5"/></svg>
+        Torna alla home
+    </a>
 
-    <form method="post" id="container" action="{% url 'classificationpipeline:event_compare' %}" class="flex flex-col gap-4 mt-4 gap-4 bg-gradient-to-r from-purple-600 to-blue-500 p-6 rounded-lg shadow-md">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <div id="select-calendars" class="flex flex-col gap-2 align-items items-center">
-        <div class="cal-container">
-            <label for="id_calendars">Seleziona Calendar:</label>
-            <select name="calendars" class="select-calendars w-full p-2 border border-gray-200 rounded" onChange="updateOptions()">
-                <option value="">Seleziona calendario</option>
-                {% for calendar, id in calendars.items %}   
-                <option value= "{{id}}" class="">{{calendar}}</option>
-                {% endfor %}
-        </select>
-        </div>
+    <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Calendari</h1>
+    <p class="mt-4 max-w-xl text-lg leading-relaxed">
+        Scegli fino a tre Google Calendar. Leggiamo gli eventi di questo mese e
+        li classifichiamo con le tue
+        <a href="{% url 'settings' %}" class="font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 hover:decoration-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">regole di classificazione</a>.
+    </p>
+
+    {% if not calendars %}
+    <div class="mt-10 rounded-lg border border-linea bg-superficie px-5 py-8 text-center">
+        Il tuo account Google non ha calendari da leggere. Creane uno su Google
+        Calendar e ricarica questa pagina.
     </div>
+    {% else %}
+    <form method="post" id="form-calendari" action="{% url 'classificationpipeline:event_compare' %}" class="mt-10" novalidate>
+        {% csrf_token %}
 
-    <button id="add-calendar" type="button" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded mt-6" onclick="addCalendar()">Aggiungi Calendario</button>
-    <button id="remove-calendar" type="button" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded mt-6" onclick="removeCalendar()">Rimuovi Calendario</button>
+        <p id="errore-calendari" role="alert" class="mb-6 hidden rounded-md border border-red-300 bg-red-50 px-5 py-4 text-red-800"></p>
 
+        {% comment %}
+        Stesso riquadro della pagina delle regole: grigio superficie, campi
+        bianchi, una x per riga. La prima riga c'e' gia': senza almeno un
+        calendario non c'e' niente da classificare.
+        {% endcomment %}
+        <div class="rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
+            <div aria-hidden="true" class="hidden border-b border-linea px-5 py-3 pl-8 text-sm font-semibold text-inchiostro sm:block">
+                Calendario
+            </div>
 
-    <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mt-6">Classifica eventi dei calendari</button>
-    
+            <div id="corpo-calendari" class="divide-y divide-linea">
+                {% include "classificationpipeline/_riga_calendario.html" %}
+            </div>
+
+            <p id="nessun-calendario" class="hidden px-5 py-8 text-center">
+                Nessun calendario scelto. Usa «Aggiungi calendario» per sceglierne uno.
+            </p>
+        </div>
+
+        <div class="mt-6 flex flex-wrap items-center gap-3">
+            <button type="button" id="aggiungi-calendario" class="h-11 rounded-md border border-bosco bg-carta px-5 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco disabled:pointer-events-none disabled:opacity-40">
+                Aggiungi calendario
+            </button>
+            <button type="submit" id="classifica" class="ml-auto h-11 rounded-md bg-bosco px-7 font-semibold text-carta transition-colors hover:bg-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco disabled:pointer-events-none disabled:opacity-40">
+                Classifica gli eventi
+            </button>
+        </div>
     </form>
-    
 
+    <template id="modello-calendario">
+        {% include "classificationpipeline/_riga_calendario.html" %}
+    </template>
+    {% endif %}
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+    (function () {
+        const form = document.getElementById('form-calendari');
+        if (!form) return;
 
-document.getElementById('container').addEventListener('submit', function(e) {
-    const selects = document.querySelectorAll('.select-calendars');
-    if(selects.length > 3){
-        e.preventDefault();
-        alert('inserisci al massimo 3 calendari per sottomissione');
-        return;
-    }
-    for (const select of selects) {
-        if (select.value === '') {
-            e.preventDefault();
-            alert('Seleziona un calendario per ogni riga prima di procedere.');
-            return;
+        // Tetto per invio, solo lato client: ogni calendario e' una chiamata
+        // sincrona a Google dentro la richiesta (vedi event_compare).
+        const MASSIMO = 3;
+        const corpo = document.getElementById('corpo-calendari');
+        const modello = document.getElementById('modello-calendario');
+        const vuoto = document.getElementById('nessun-calendario');
+        const aggiungi = document.getElementById('aggiungi-calendario');
+        const classifica = document.getElementById('classifica');
+        const errore = document.getElementById('errore-calendari');
+        const disponibili = modello.content.querySelectorAll('option[value]:not([value=""])').length;
+
+        function selects() {
+            return Array.from(corpo.querySelectorAll('select'));
         }
-    }
-});
 
-function addCalendar(){
-    var container = document.getElementById('select-calendars');
+        // Un calendario gia' scelto in una riga non si puo' scegliere in
+        // un'altra: verrebbe letto due volte.
+        function aggiorna() {
+            const scelti = selects().map(function (s) { return s.value; });
+            selects().forEach(function (s) {
+                s.querySelectorAll('option').forEach(function (o) {
+                    o.disabled = o.value !== '' && o.value !== s.value && scelti.includes(o.value);
+                });
+            });
+            const n = corpo.children.length;
+            vuoto.classList.toggle('hidden', n > 0);
+            aggiungi.disabled = n >= Math.min(MASSIMO, disponibili);
+            classifica.disabled = n === 0;
+        }
 
-    var clone = container.cloneNode(true);
-    clone.querySelector('select').value = "";
-    document.getElementById('add-calendar').insertAdjacentElement('beforebegin', clone);
-}
+        function mostraErrore(testo) {
+            errore.textContent = testo;
+            errore.classList.toggle('hidden', !testo);
+        }
 
-function removeCalendar(){
-    var container = document.getElementById('select-calendars');
-    var clones = document.querySelectorAll('#select-calendars ~ #select-calendars');
+        aggiungi.addEventListener('click', function () {
+            const riga = modello.content.firstElementChild.cloneNode(true);
+            corpo.appendChild(riga);
+            aggiorna();
+            riga.querySelector('select').focus();
+        });
 
-    if (clones.length > 0) {
-        clones[clones.length - 1].remove();
-        updateOptions();
-    }
-}
+        corpo.addEventListener('click', function (e) {
+            const bottone = e.target.closest('[data-rimuovi]');
+            if (!bottone) return;
+            const riga = bottone.closest('.riga-calendario');
+            const vicina = riga.nextElementSibling || riga.previousElementSibling;
+            riga.remove();
+            mostraErrore('');
+            aggiorna();
+            (vicina ? vicina.querySelector('select') : aggiungi).focus();
+        });
 
-function updateOptions(){
-   const selects = document.querySelectorAll('.select-calendars');
+        corpo.addEventListener('change', function () {
+            mostraErrore('');
+            aggiorna();
+        });
 
-    const selectedValues = Array.from(selects)
-        .map(select => select.value);
-    
-    selects.forEach(select => {
-        const options = select.querySelectorAll('option');
-
-        options.forEach(option => {
-            if (selectedValues.includes(option.value) && option.value !== select.value) {
-                option.disabled = true;
-            } else {
-                option.disabled = false;
+        form.addEventListener('submit', function (e) {
+            const vuota = selects().find(function (s) { return s.value === ''; });
+            if (vuota) {
+                e.preventDefault();
+                mostraErrore('Scegli un calendario in ogni riga, oppure togli le righe vuote.');
+                vuota.focus();
             }
         });
-    });
-}
+
+        aggiorna();
+    })();
 </script>
 {% endblock %}
