@@ -1,0 +1,308 @@
+{
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/__init__.py": {
+    "mtime": 1776675195.6553423,
+    "seen": 1787332825.626195,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/admin.py": {
+    "mtime": 1776675195.656937,
+    "seen": 1787332825.6262007,
+    "ast_hash": "e3dc717de887db03a015667a5fec59d8",
+    "semantic_hash": "e3dc717de887db03a015667a5fec59d8"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/apps.py": {
+    "mtime": 1776675924.1355424,
+    "seen": 1787332825.626203,
+    "ast_hash": "ff404078cb0d7beedcc3466734a12032",
+    "semantic_hash": "ff404078cb0d7beedcc3466734a12032"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/migrations/0001_initial.py": {
+    "mtime": 1778516661.9965012,
+    "seen": 1787332825.6262047,
+    "ast_hash": "335d92cc802228e4f0df9179771f072d",
+    "semantic_hash": "335d92cc802228e4f0df9179771f072d"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/migrations/__init__.py": {
+    "mtime": 1776675195.656937,
+    "seen": 1787332825.626206,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/models.py": {
+    "mtime": 1778516661.9965012,
+    "seen": 1787332825.626207,
+    "ast_hash": "bf3f26fe8c084f99fc62d4e4d05d3759",
+    "semantic_hash": "bf3f26fe8c084f99fc62d4e4d05d3759"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/tests.py": {
+    "mtime": 1776675195.6573646,
+    "seen": 1787332825.6262088,
+    "ast_hash": "465b7e9f69bfd158c850cdfbc7306818",
+    "semantic_hash": "465b7e9f69bfd158c850cdfbc7306818"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/urls.py": {
+    "mtime": 1776693061.6154354,
+    "seen": 1787332825.62621,
+    "ast_hash": "d237044e2399380103cba25fa195fb19",
+    "semantic_hash": "d237044e2399380103cba25fa195fb19"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/views.py": {
+    "mtime": 1776693480.292446,
+    "seen": 1787332825.6262112,
+    "ast_hash": "fe9e815ed1ebeae2ab34111ec28c4db2",
+    "semantic_hash": "fe9e815ed1ebeae2ab34111ec28c4db2"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/__init__.py": {
+    "mtime": 1774973755.2833843,
+    "seen": 1787332825.6262124,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/admin.py": {
+    "mtime": 1774973755.2838085,
+    "seen": 1787332825.6262138,
+    "ast_hash": "e3dc717de887db03a015667a5fec59d8",
+    "semantic_hash": "e3dc717de887db03a015667a5fec59d8"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/apps.py": {
+    "mtime": 1774973755.2846568,
+    "seen": 1787332825.6262152,
+    "ast_hash": "73c1638416c48725e626302503e1a922",
+    "semantic_hash": "73c1638416c48725e626302503e1a922"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/migrations/0001_initial.py": {
+    "mtime": 1778516661.9965012,
+    "seen": 1787332825.6262164,
+    "ast_hash": "92f355c4055fa1c486e06736c9528431",
+    "semantic_hash": "92f355c4055fa1c486e06736c9528431"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/migrations/0002_remove_event_calendar_delete_calendar_delete_event.py": {
+    "mtime": 1778608200.3159373,
+    "seen": 1787332825.6262178,
+    "ast_hash": "67d2fe3df824e4cd5caab086d09da429",
+    "semantic_hash": "67d2fe3df824e4cd5caab086d09da429"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/migrations/__init__.py": {
+    "mtime": 1774973755.284761,
+    "seen": 1787332825.626219,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/models.py": {
+    "mtime": 1778611233.464996,
+    "seen": 1787332825.62622,
+    "ast_hash": "5e458f106c8f1ba213e1c68f4b37608b",
+    "semantic_hash": "5e458f106c8f1ba213e1c68f4b37608b"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/tests.py": {
+    "mtime": 1774973755.284761,
+    "seen": 1787332825.626221,
+    "ast_hash": "465b7e9f69bfd158c850cdfbc7306818",
+    "semantic_hash": "465b7e9f69bfd158c850cdfbc7306818"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/urls.py": {
+    "mtime": 1778610581.2770197,
+    "seen": 1787332825.6262224,
+    "ast_hash": "42cc6a88671344bf17e3652140497f4e",
+    "semantic_hash": "42cc6a88671344bf17e3652140497f4e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/views.py": {
+    "mtime": 1778610396.394413,
+    "seen": 1787332825.6262233,
+    "ast_hash": "f073acb666c1981403ab1a3897232036",
+    "semantic_hash": "f073acb666c1981403ab1a3897232036"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/__init__.py": {
+    "mtime": 1778607822.851763,
+    "seen": 1787332825.6262248,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/admin.py": {
+    "mtime": 1778607822.852763,
+    "seen": 1787332825.626226,
+    "ast_hash": "e3dc717de887db03a015667a5fec59d8",
+    "semantic_hash": "e3dc717de887db03a015667a5fec59d8"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/apps.py": {
+    "mtime": 1778608099.9967887,
+    "seen": 1787332825.626227,
+    "ast_hash": "11f4e9759259620e705005c9a1d05573",
+    "semantic_hash": "11f4e9759259620e705005c9a1d05573"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/migrations/0001_initial.py": {
+    "mtime": 1778608248.3961828,
+    "seen": 1787332825.6262283,
+    "ast_hash": "7f1f82f8e483c81176f6c6a2b003b39c",
+    "semantic_hash": "7f1f82f8e483c81176f6c6a2b003b39c"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/migrations/0002_alter_calendar_id_alter_event_id.py": {
+    "mtime": 1778608327.0897799,
+    "seen": 1787332825.6262295,
+    "ast_hash": "3492e5cee586006098c5f19aef421ab6",
+    "semantic_hash": "3492e5cee586006098c5f19aef421ab6"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/migrations/__init__.py": {
+    "mtime": 1778607822.8544254,
+    "seen": 1787332825.6262305,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/models.py": {
+    "mtime": 1778608324.4488096,
+    "seen": 1787332825.626232,
+    "ast_hash": "969bb32b0c2a4c94cdb1cf00925f4a5d",
+    "semantic_hash": "969bb32b0c2a4c94cdb1cf00925f4a5d"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/tests.py": {
+    "mtime": 1778607822.8544254,
+    "seen": 1787332825.6262329,
+    "ast_hash": "465b7e9f69bfd158c850cdfbc7306818",
+    "semantic_hash": "465b7e9f69bfd158c850cdfbc7306818"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/urls.py": {
+    "mtime": 1778610552.0010169,
+    "seen": 1787332825.626234,
+    "ast_hash": "c7f4a19a7da524262a116cef575dcca1",
+    "semantic_hash": "c7f4a19a7da524262a116cef575dcca1"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/views.py": {
+    "mtime": 1778610868.1880465,
+    "seen": 1787332825.6262414,
+    "ast_hash": "0a05415e338b8f196940068fafe9bff0",
+    "semantic_hash": "0a05415e338b8f196940068fafe9bff0"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/__init__.py": {
+    "mtime": 1778516661.9965012,
+    "seen": 1787332825.6262429,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/admin.py": {
+    "mtime": 1778516661.997732,
+    "seen": 1787332825.6262438,
+    "ast_hash": "e3dc717de887db03a015667a5fec59d8",
+    "semantic_hash": "e3dc717de887db03a015667a5fec59d8"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/apps.py": {
+    "mtime": 1778606626.4584687,
+    "seen": 1787332825.6262448,
+    "ast_hash": "aa5a6abc0e8e0f489b489429b71c7646",
+    "semantic_hash": "aa5a6abc0e8e0f489b489429b71c7646"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/migrations/0001_initial.py": {
+    "mtime": 1778516661.997732,
+    "seen": 1787332825.626246,
+    "ast_hash": "ceebe94bed0ce0846fb4c910bb51933e",
+    "semantic_hash": "ceebe94bed0ce0846fb4c910bb51933e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/migrations/__init__.py": {
+    "mtime": 1778516661.997732,
+    "seen": 1787332825.6262472,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/models.py": {
+    "mtime": 1778516661.997732,
+    "seen": 1787332825.6262484,
+    "ast_hash": "b50c11f2612898312c3cb50457f333c1",
+    "semantic_hash": "b50c11f2612898312c3cb50457f333c1"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/tests.py": {
+    "mtime": 1778516661.9983983,
+    "seen": 1787332825.6262498,
+    "ast_hash": "465b7e9f69bfd158c850cdfbc7306818",
+    "semantic_hash": "465b7e9f69bfd158c850cdfbc7306818"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/urls.py": {
+    "mtime": 1778606688.805345,
+    "seen": 1787332825.626251,
+    "ast_hash": "04482ae7aebc576a1113b59bfc8f0756",
+    "semantic_hash": "04482ae7aebc576a1113b59bfc8f0756"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/views.py": {
+    "mtime": 1778606691.1274312,
+    "seen": 1787332825.6262522,
+    "ast_hash": "56843a725ee89f193bedf598586bc50d",
+    "semantic_hash": "56843a725ee89f193bedf598586bc50d"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/manage.py": {
+    "mtime": 1774973700.9346876,
+    "seen": 1787332825.6262536,
+    "ast_hash": "d598e8db78a6c3f2c677b6b85302c350",
+    "semantic_hash": "d598e8db78a6c3f2c677b6b85302c350"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/mysite/__init__.py": {
+    "mtime": 1774973700.9349248,
+    "seen": 1787332825.6262546,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/mysite/asgi.py": {
+    "mtime": 1774973700.9354093,
+    "seen": 1787332825.6262562,
+    "ast_hash": "6d21ba1917b0cf349c1b2090b2738972",
+    "semantic_hash": "6d21ba1917b0cf349c1b2090b2738972"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/mysite/settings.py": {
+    "mtime": 1778608115.09979,
+    "seen": 1787332825.6262574,
+    "ast_hash": "af3e24f9371628d32894eca96d1d8090",
+    "semantic_hash": "af3e24f9371628d32894eca96d1d8090"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/mysite/urls.py": {
+    "mtime": 1778609762.1116552,
+    "seen": 1787332825.6262586,
+    "ast_hash": "433d6b32070037396e191e3c4c3a6e85",
+    "semantic_hash": "433d6b32070037396e191e3c4c3a6e85"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/mysite/wsgi.py": {
+    "mtime": 1774973700.9349248,
+    "seen": 1787332825.626261,
+    "ast_hash": "b544937be4cea73b078a8d9d92f2718b",
+    "semantic_hash": "b544937be4cea73b078a8d9d92f2718b"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/authentication/templates/authentication/index.html": {
+    "mtime": 1778516661.9965012,
+    "seen": 1787332825.6262622,
+    "ast_hash": "cfcc419868e4d29182a745938899b0d0",
+    "semantic_hash": "cfcc419868e4d29182a745938899b0d0"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/calendars/templates/calendars/eventi_calendars.html": {
+    "mtime": 1778611233.4625547,
+    "seen": 1787332825.6262636,
+    "ast_hash": "8992749f0c9ce79141158a2c0a94b052",
+    "semantic_hash": "8992749f0c9ce79141158a2c0a94b052"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/classificationpipeline/templates/classificationpipeline/event_compare.html": {
+    "mtime": 1778610686.9220295,
+    "seen": 1787332825.6262646,
+    "ast_hash": "6c7129788fb6a41b434b232bae5d9989",
+    "semantic_hash": "6c7129788fb6a41b434b232bae5d9989"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/hooks/templates/hooks/settings.html": {
+    "mtime": 1778516661.9983983,
+    "seen": 1787332825.6262658,
+    "ast_hash": "d150fe208aa1f14825d0025644cb7f6b",
+    "semantic_hash": "d150fe208aa1f14825d0025644cb7f6b"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/requirements.txt": {
+    "mtime": 1778516661.9983983,
+    "seen": 1787332825.626267,
+    "ast_hash": "51cb059b4784c2c01d31f17a9b2421fa",
+    "semantic_hash": "51cb059b4784c2c01d31f17a9b2421fa"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/templates/auto_login_google.html": {
+    "mtime": 1778516661.9983983,
+    "seen": 1787332825.6262681,
+    "ast_hash": "038c2ef4a598ad9c3158c726428a264a",
+    "semantic_hash": "038c2ef4a598ad9c3158c726428a264a"
+  },
+  "/home/vays/Scrivania/timesheetcompiler/TimeSheetCompiler/TimeSheetCompiler/templates/index.html": {
+    "mtime": 1776854073.7489116,
+    "seen": 1787332825.626269,
+    "ast_hash": "bed143775ba7cd788c663501ede4de4a",
+    "semantic_hash": "bed143775ba7cd788c663501ede4de4a"
+  }
+}

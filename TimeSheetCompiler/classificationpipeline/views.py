@@ -235,5 +235,5 @@ def classifica_incerti(request):
         with transaction.atomic():
             Event.objects.bulk_update(events, ['category', 'status'])
 
-        return redirect('classificationpipeline:event_compare')
+    return redirect('classificationpipeline:event_compare')
 

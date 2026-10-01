@@ -791,3 +791,142 @@ class SelectCalendarsViewTests(TestCase):
         self.assertEqual(response.url, '/index/?next=/calendars/')
         mock_token.assert_not_called()
         mock_get.assert_not_called()
+
+
+@override_settings(SHIBBOLETH_DEV_MODE=False)
+class ClassificaIncertiTests(TestCase):
+    """The POST of the event_compare form assigns by hand a category to the
+    incerto events: each field is named categoria_<pk> and carries one of
+    Event.Category's values. Only the logged docente's incerto events may be
+    touched; anything else in the POST is ignored.
+    """
+
+    URL = '/events/classifica/'
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='docente')
+        self.docente = Docente.objects.create(
+            user=self.user, id_unimore=4242, cognome='Rossi')
+        self.calendar = Calendar.objects.create(
+            docente=self.docente, calendar_id='cal-a@google.com', title='Didattica')
+
+    def _event(self, event_id, calendar=None, **kwargs):
+        return Event.objects.create(
+            calendar=calendar or self.calendar, event_id=event_id, title='Riunione',
+            start_time='2026-09-01T09:00:00Z', end_time='2026-09-01T11:00:00Z',
+            **_with_category(kwargs))
+
+    def test_anonymous_post_is_redirected_to_login_and_changes_nothing(self):
+        event = self._event('evt-1')
+
+        response = self.client.post(
+            self.URL, {f'categoria_{event.pk}': Event.Category.DIDATTICA})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f'/index/?next={self.URL}')
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.INCERTO)
+
+    def test_get_changes_nothing_and_redirects_to_compare(self):
+        event = self._event('evt-1')
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            self.URL, {f'categoria_{event.pk}': Event.Category.DIDATTICA})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/events/')
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.INCERTO)
+
+    def test_chosen_category_classifies_the_event_and_redirects_to_compare(self):
+        event = self._event('evt-1')
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            self.URL, {f'categoria_{event.pk}': Event.Category.RICERCA_BASE})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/events/')
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.CLASSIFICATO)
+        self.assertEqual(event.category, Event.Category.RICERCA_BASE)
+
+    def test_several_events_each_get_their_own_category(self):
+        first = self._event('evt-1')
+        second = self._event('evt-2')
+        self.client.force_login(self.user)
+
+        self.client.post(self.URL, {
+            f'categoria_{first.pk}': Event.Category.DIDATTICA,
+            f'categoria_{second.pk}': Event.Category.RICERCA_FINANZIATA,
+        })
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.category, Event.Category.DIDATTICA)
+        self.assertEqual(second.category, Event.Category.RICERCA_FINANZIATA)
+
+    def test_an_event_left_without_a_choice_stays_incerto(self):
+        chosen = self._event('evt-1')
+        skipped = self._event('evt-2')
+        self.client.force_login(self.user)
+
+        self.client.post(self.URL, {
+            f'categoria_{chosen.pk}': Event.Category.DIDATTICA,
+            f'categoria_{skipped.pk}': '',
+        })
+
+        skipped.refresh_from_db()
+        self.assertEqual(skipped.status, Event.Status.INCERTO)
+        self.assertEqual(skipped.category, '')
+
+    def test_an_unknown_category_is_ignored(self):
+        event = self._event('evt-1')
+        self.client.force_login(self.user)
+
+        self.client.post(self.URL, {f'categoria_{event.pk}': 'vacanza'})
+
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.INCERTO)
+        self.assertEqual(event.category, '')
+
+    def test_malformed_field_names_are_ignored(self):
+        event = self._event('evt-1')
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.URL, {
+            'categoria_abc': Event.Category.DIDATTICA,
+            'altro_campo': Event.Category.DIDATTICA,
+        })
+
+        self.assertEqual(response.status_code, 302)
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.INCERTO)
+
+    def test_events_of_another_docente_are_not_touched(self):
+        other_user = User.objects.create_user(username='altro')
+        other_docente = Docente.objects.create(
+            user=other_user, id_unimore=4343, cognome='Bianchi')
+        other_calendar = Calendar.objects.create(
+            docente=other_docente, calendar_id='cal-b@google.com', title='Ricerca')
+        foreign = self._event('evt-1', calendar=other_calendar)
+        self.client.force_login(self.user)
+
+        self.client.post(
+            self.URL, {f'categoria_{foreign.pk}': Event.Category.DIDATTICA})
+
+        foreign.refresh_from_db()
+        self.assertEqual(foreign.status, Event.Status.INCERTO)
+        self.assertEqual(foreign.category, '')
+
+    def test_an_already_classified_event_is_not_rewritten(self):
+        event = self._event(
+            'evt-1', status=Event.Status.CLASSIFICATO, category=Event.Category.DIDATTICA)
+        self.client.force_login(self.user)
+
+        self.client.post(
+            self.URL, {f'categoria_{event.pk}': Event.Category.RICERCA_BASE})
+
+        event.refresh_from_db()
+        self.assertEqual(event.category, Event.Category.DIDATTICA)
