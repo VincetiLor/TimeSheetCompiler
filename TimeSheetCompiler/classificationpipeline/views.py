@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 from hooks.models import Hook
 from .models import Calendar, Event
 from authentication.services import get_token_valido
+from django.db import transaction
+
 
 # (connect, read) in secondi: senza, una Google API bloccata tiene occupato
 # il worker Django a tempo indeterminato.
@@ -78,6 +80,27 @@ def parse_google_datetime(node, calendar_tz):
 
     giorno = datetime.fromisoformat(node['date'])
     return giorno.replace(tzinfo=ZoneInfo(calendar_tz))
+
+
+@login_required
+def check_events(request):
+
+    now = timezone.localtime()  
+    first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    first_of_next_month = (first_of_this_month + timedelta(days=32)).replace(day=1)
+
+    events = Event.objects.filter(
+        calendar__docente=request.user.docente,
+        start_time__gte=first_of_this_month,
+        start_time__lt=first_of_next_month,
+    ).order_by('start_time')
+
+    return render(request, 'classificationpipeline/event_compare.html', {         
+    'mese': f"{MESI[first_of_this_month.month - 1]} {first_of_this_month.year}",
+    'eventi_classificati': events.filter(status=Event.Status.CLASSIFICATO),
+    'eventi_incerti': events.filter(status=Event.Status.INCERTO),
+    'categorie': Event.Category.choices,
+    })
 
 
 @login_required
@@ -161,7 +184,7 @@ def event_compare(request):
             Event.objects
             .filter(
                 calendar__docente=request.user.docente,
-                calendar__calendar_id__in=calendar_ids,
+                calendar__calendar_id__in=calendar_ids, 
                 start_time__gte=first_of_this_month,
                 start_time__lt=first_of_next_month,
             )
@@ -174,7 +197,43 @@ def event_compare(request):
             'mese': f"{MESI[first_of_this_month.month - 1]} {first_of_this_month.year}",
             'eventi_classificati': eventi.filter(status=Event.Status.CLASSIFICATO),
             'eventi_incerti': eventi.filter(status=Event.Status.INCERTO),
+            'categorie': Event.Category.choices,
         })
     
     else:
-        return redirect('classificationpipeline:eventi_calendars')
+        return check_events(request)
+
+
+@login_required
+def classifica_incerti(request):
+
+    if request.method == 'POST':
+
+        choices = {}
+        for key, value in request.POST.items():
+            if not value or not key.startswith('categoria_'):
+                continue
+            if value not in Event.Category.values:
+                continue
+            try:
+                pk = int(key.removeprefix('categoria_'))
+            except ValueError:
+                continue
+            choices[pk] = value
+
+
+        events = list(Event.objects.filter(
+            pk__in = choices,
+            calendar__docente = request.user.docente,
+            status = Event.Status.INCERTO,
+        ))
+
+        for event in events:
+            event.category = choices[event.pk]
+            event.status = Event.Status.CLASSIFICATO
+
+        with transaction.atomic():
+            Event.objects.bulk_update(events, ['category', 'status'])
+
+        return redirect('classificationpipeline:event_compare')
+

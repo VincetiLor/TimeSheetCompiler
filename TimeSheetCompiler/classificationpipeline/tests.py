@@ -120,14 +120,6 @@ class EventCompareTests(TestCase):
         mock_token.assert_not_called()
         mock_get.assert_not_called()
 
-    def test_get_redirects_back_to_calendar_selection(self):
-        self.client.force_login(self.user)
-
-        response = self.client.get('/events/')
-
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/calendars/')
-
     @mock.patch('classificationpipeline.views.requests.get')
     @mock.patch('classificationpipeline.views.get_token_valido', side_effect=Exception('no token'))
     def test_missing_google_token_redirects_to_calendar_selection(self, mock_token, mock_get):

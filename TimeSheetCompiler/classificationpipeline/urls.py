@@ -11,4 +11,5 @@ app_name = 'classificationpipeline'
 urlpatterns = [
     path('calendars/', views.SelectCalendarsView.as_view(), name='eventi_calendars'),
     path('events/', views.event_compare, name='event_compare'),
+    path('events/classifica/', views.classifica_incerti, name='classifica_incerti'),
 ]

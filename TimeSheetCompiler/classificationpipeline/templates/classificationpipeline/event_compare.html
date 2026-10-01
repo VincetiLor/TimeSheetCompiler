@@ -45,20 +45,33 @@
 
         {% if eventi_incerti %}
         <p class="mt-2 max-w-xl">
-            Per ora restano fuori dal timesheet. Per classificarli aggiungi una
+            Per ora restano fuori dal timesheet. Per un evento isolato scegli la
+            categoria qui sotto e salva; se un evento si ripete, conviene una
             parola chiave nelle
-            <a href="{% url 'settings' %}" class="font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 hover:decoration-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">regole di classificazione</a>
-            e rilancia la classificazione.
+            <a href="{% url 'settings' %}" class="font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 hover:decoration-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">regole di classificazione</a>.
         </p>
-        {% endif %}
 
+        {% comment %}
+        Un solo form per tutti gli incerti: le select vuote lasciano l'evento
+        incerto, quelle valorizzate lo classificano. La view risponde con un
+        redirect al GET di questa pagina (Post/Redirect/Get).
+        {% endcomment %}
+        <form method="post" action="{% url 'classificationpipeline:classifica_incerti' %}">
+            {% csrf_token %}
+            <div class="mt-4 rounded-lg border border-dashed border-linea">
+                {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_incerti categoria=False scelta=True %}
+            </div>
+            <div class="mt-4 flex">
+                <button type="submit" class="h-11 rounded-md border border-bosco bg-carta px-6 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                    Salva classificazioni
+                </button>
+            </div>
+        </form>
+        {% else %}
         <div class="mt-4 rounded-lg border border-dashed border-linea">
-            {% if eventi_incerti %}
-                {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_incerti categoria=False %}
-            {% else %}
-                <p class="px-5 py-8 text-center">Nessun evento incerto: ogni evento del mese ha una categoria.</p>
-            {% endif %}
+            <p class="px-5 py-8 text-center">Nessun evento incerto: ogni evento del mese ha una categoria.</p>
         </div>
+        {% endif %}
     </section>
 
     {% comment %}

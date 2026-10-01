@@ -1613,3 +1613,46 @@ compilazione (Selenium) diventerà un form POST con gli stessi `calendar_ids`.
 `classificationpipeline/templates/classificationpipeline/event_compare.html`,
 `classificationpipeline/templates/classificationpipeline/_tabella_eventi.html`,
 `classificationpipeline/tests.py`
+
+## Incerti: scelta della categoria in linea, un solo form, view dedicata
+
+Per gli eventi isolati, che non meritano una parola chiave, l'utente sceglie la
+categoria dalla pagina eventi. Non è un inserimento libero: la select offre solo
+`Event.Category.choices`, cioè le categorie che il timesheet accetta. Gli eventi
+ripetuti restano compito delle regole, e il testo sopra la tabella lo dice.
+
+```django
+<select name="categoria_{{ evento.pk }}" ...>
+    <option value="">Resta incerto</option>
+    {% for valore, etichetta in categorie %}
+    <option value="{{ valore }}">{{ etichetta }}</option>
+    {% endfor %}
+</select>
+```
+
+**In linea, non in una pagina dedicata**: è un ritocco su uno o due eventi.
+Una pagina a parte costerebbe due navigazioni e toglierebbe il contesto (gli
+altri eventi del mese, date e orari).
+
+**Un solo form con un unico "Salva", select sempre attive**: un solo POST e
+nessun JavaScript. Scartato il tasto che "sblocca" le select: sugli incerti un
+cambio involontario non sovrascrive nulla, perché il valore vuoto lascia
+l'evento incerto. Il tasto di sblocco avrà senso se un giorno si potranno
+correggere anche i classificati.
+
+**URL e view separate** (`events/classifica/`, `classifica_incerti`): il POST
+di `events/` vuol dire già "sincronizza da Google". Mandare lì anche questo
+form costringerebbe `event_compare` a capire quale azione le chiedono da un
+campo del form. La view risponde con un redirect al GET di `event_compare`
+(Post/Redirect/Get), così F5 non reinvia il form e il contesto della pagina lo
+costruisce una sola view. La view deve comunque validare lato server: evento
+del docente, ancora `INCERTO`, categoria in `Event.Category.values`.
+
+```python
+path('events/classifica/', views.classifica_incerti, name='classifica_incerti'),
+```
+
+**File**: `classificationpipeline/urls.py`, `classificationpipeline/views.py`
+(contesto `categorie`),
+`classificationpipeline/templates/classificationpipeline/event_compare.html`,
+`classificationpipeline/templates/classificationpipeline/_tabella_eventi.html`

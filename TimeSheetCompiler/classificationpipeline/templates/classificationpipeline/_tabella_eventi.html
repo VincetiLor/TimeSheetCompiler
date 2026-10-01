@@ -2,6 +2,10 @@
 Tabella eventi, condivisa fra classificati e incerti. Parametri:
   eventi     - queryset di Event
   categoria  - True per mostrare la colonna Categoria
+  scelta     - True per mostrare, al posto della categoria, una select con le
+               categorie ammesse (lista `categorie` di coppie valore/etichetta).
+               Va inclusa dentro un <form>: ogni select si chiama
+               categoria_<pk>, e vuota vuol dire "lascia l'evento incerto".
 Gli eventi "giornata intera" arrivano da Google come mezzanotte-mezzanotte
 (vedi parse_google_datetime): mostrarli come 00:00-00:00 sembrerebbe un errore.
 {% endcomment %}
@@ -13,7 +17,7 @@ Gli eventi "giornata intera" arrivano da Google come mezzanotte-mezzanotte
                 <th scope="col" class="px-5 py-3 font-semibold">Calendario</th>
                 <th scope="col" class="px-5 py-3 font-semibold whitespace-nowrap">Data</th>
                 <th scope="col" class="px-5 py-3 font-semibold">Orario</th>
-                {% if categoria %}<th scope="col" class="px-5 py-3 font-semibold">Categoria</th>{% endif %}
+                {% if categoria or scelta %}<th scope="col" class="px-5 py-3 font-semibold">Categoria</th>{% endif %}
             </tr>
         </thead>
         <tbody class="divide-y divide-linea">
@@ -32,6 +36,15 @@ Gli eventi "giornata intera" arrivano da Google come mezzanotte-mezzanotte
                 {% if categoria %}
                 <td class="px-5 py-3">
                     <span class="inline-block rounded-full bg-bosco-chiaro px-3 py-1 text-sm font-medium whitespace-nowrap text-bosco-scuro">{{ evento.get_category_display }}</span>
+                </td>
+                {% elif scelta %}
+                <td class="px-5 py-2">
+                    <select name="categoria_{{ evento.pk }}" aria-label="Categoria di {{ evento.title|default:'(senza titolo)' }}, {{ evento.start_time|date:'d/m/Y' }}" class="campo h-9 w-auto min-w-44 text-sm">
+                        <option value="">Resta incerto</option>
+                        {% for valore, etichetta in categorie %}
+                        <option value="{{ valore }}">{{ etichetta }}</option>
+                        {% endfor %}
+                    </select>
                 </td>
                 {% endif %}
             </tr>

@@ -13,15 +13,7 @@
     </p>
 </section>
 
-{% comment %}
-Due colonne con ruoli diversi. A sinistra il percorso, che e' una sequenza
-reale (regole, calendari, compilazione): numerato, in verticale, con la linea
-verde che collega i passi e si traccia una volta sola al caricamento.
-A destra, alla stessa altezza, le funzioni che non fanno parte del percorso:
-card come quelle dei passi ma senza numeri, cosi' non si leggono come un passo 4.
-Il Google login non parte da qui: lo avviano le pagine che hanno bisogno del
-token (vedi SelectCalendarsView).
-{% endcomment %}
+
 <div class="mt-16 grid items-start gap-16 sm:mt-24 md:grid-cols-2 md:gap-10">
 
     <section aria-labelledby="percorso">
@@ -48,14 +40,14 @@ token (vedi SelectCalendarsView).
                 </a>
             </li>
 
-            {# Compilazione (Selenium) non ancora implementata: passo visibile ma non cliccabile. #}
+            
             <li class="relative flex gap-4">
-                <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full border border-bosco bg-fondo font-serif text-lg text-bosco">3</span>
-                <div aria-disabled="true" class="flex flex-1 flex-col rounded-md border border-dashed border-linea px-5 py-4">
-                    <h3 class="font-serif text-xl text-inchiostro/60">Compila il timesheet</h3>
+                <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-bosco font-serif text-lg text-carta">3</span>
+                <a href="{% url 'classificationpipeline:event_compare' %}" class="group flex flex-1 flex-col rounded-md border border-linea bg-carta px-5 py-4 transition-colors hover:border-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                    <h3 class="font-serif text-xl text-inchiostro group-hover:text-bosco-scuro">Compila il timesheet</h3>
                     <p class="mt-1">Inserisce nel timesheet gli eventi classificati.</p>
-                    <span class="mt-3 self-start text-sm font-medium">Non ancora disponibile</span>
-                </div>
+                    <span class="mt-3 self-start text-sm font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 group-hover:decoration-bosco">Compila</span>
+                </a>
             </li>
         </ol>
     </section>
@@ -63,7 +55,7 @@ token (vedi SelectCalendarsView).
     <section aria-labelledby="altro">
         <h2 id="altro" class="font-serif text-2xl text-inchiostro">Altre funzioni</h2>
 
-        {# Pagine non ancora esistenti: card visibili ma non cliccabili. #}
+        
         <ul class="mt-6 space-y-4">
             <li aria-disabled="true" class="flex flex-col rounded-md border border-dashed border-linea px-5 py-4">
                 <h3 class="font-serif text-xl text-inchiostro/60">Eventi del mese</h3>
