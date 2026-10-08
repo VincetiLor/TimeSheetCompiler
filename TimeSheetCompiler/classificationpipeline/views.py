@@ -3,24 +3,22 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.generic import TemplateView
-import requests
-import json
 from django.conf import settings
 from django.utils import timezone
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from hooks.models import Hook
-from .models import Calendar, Event
-from authentication.services import get_token_valido
+from .models import Calendar, Event, expiry_cutoff
+from authentication.services import (
+    GoogleCredentialsError,
+    get_calendar_service,
+    list_calendars,
+    list_events,
+)
 from django.db import transaction
+from googleapiclient.errors import HttpError
 
 
-# (connect, read) in secondi: senza, una Google API bloccata tiene occupato
-# il worker Django a tempo indeterminato.
-GOOGLE_API_TIMEOUT = (5, 10)
-
-# Nomi dei mesi scritti qui e non con il filtro |date:"F": LANGUAGE_CODE e'
-# 'en-us' e il filtro darebbe "September".
 MESI = [
     'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
     'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
@@ -31,32 +29,22 @@ class SelectCalendarsView(LoginRequiredMixin, TemplateView):
     template_name = 'classificationpipeline/eventi_calendars.html'
     context_object_name = 'calendars'
 
-    # Il token si cerca in get() e non in dispatch(): un dispatch() definito qui
-    # girerebbe prima di quello di LoginRequiredMixin, e un anonimo finirebbe
-    # all'OAuth Google invece che a LOGIN_URL.
     def get(self, request, *args, **kwargs):
         try:
-            self.token = get_token_valido(self.request.user)
-        except:
-             return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
+            self.calendar_items = list_calendars(get_calendar_service(request.user))
+        except GoogleCredentialsError:
+            return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
+        except HttpError as exc:
+            if exc.resp.status not in (401, 403):
+                raise
+            return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
         return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-
-        response = requests.get(
-            'https://www.googleapis.com/calendar/v3/users/me/calendarList',
-            headers = {'Authorization': f'Bearer {self.token}'},
-            params={'maxResults': 10},
-            timeout=GOOGLE_API_TIMEOUT,
-        )
-        calendar_list = response.json().get('items', [])
-        calendars = {}
-        for calendar in calendar_list:
-            calendars[calendar['summary']] = calendar['id']
-
-        print(calendars)
-        context['calendars'] = calendars
+        context['calendars'] = {
+            calendar['summary']: calendar['id'] for calendar in self.calendar_items
+        }
         return context
 
 
@@ -85,8 +73,7 @@ def parse_google_datetime(node, calendar_tz):
 @login_required
 def check_events(request):
 
-    now = timezone.localtime()  
-    first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    first_of_this_month = expiry_cutoff()
     first_of_next_month = (first_of_this_month + timedelta(days=32)).replace(day=1)
 
     events = Event.objects.filter(
@@ -108,34 +95,27 @@ def event_compare(request):
 
     if request.method == 'POST':
         calendar_ids = request.POST.getlist('calendars')
-        print(calendar_ids)
-      
+
         try:
-            token = get_token_valido(request.user)
-        except Exception:
+            service = get_calendar_service(request.user)
+        except GoogleCredentialsError:
             return redirect('classificationpipeline:eventi_calendars')
-        
-        now = timezone.localtime()  
-        first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        first_of_this_month = expiry_cutoff()
         first_of_next_month = (first_of_this_month + timedelta(days=32)).replace(day=1)
         hooks = request.user.docente.hook.config
         for calendar_id in calendar_ids:
 
-            response = requests.get(
-                f'https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events',
-                headers={'Authorization': f'Bearer {token}'},
-                params = {
-                    'singleEvents' : 'true',
-                    'orderBy' : 'startTime',
-                    'timeMin' : first_of_this_month.isoformat(),
-                    'timeMax' : first_of_next_month.isoformat(),
-                    },
-                timeout=GOOGLE_API_TIMEOUT,
-            )
-            if response.status_code != 200:
+            try:
+                data = list_events(
+                    service, calendar_id, first_of_this_month, first_of_next_month)
+            except HttpError:
+                # Calendario che Google rifiuta (rimosso, non piu' condiviso):
+                # si salta e si prosegue con gli altri.
                 continue
+            except GoogleCredentialsError:
+                return redirect('classificationpipeline:eventi_calendars')
 
-            data = response.json()
             calendar_tz = data.get('timeZone', settings.TIME_ZONE)
             events = data.get('items', [])
 

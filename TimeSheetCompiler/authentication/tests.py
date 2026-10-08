@@ -6,20 +6,33 @@ can inject those headers directly, so the middleware is testable in isolation.
 
 Note on Google OAuth: the handshake itself belongs to allauth and to Google's
 servers and is not tested here. What is tested is our consumer of the stored
-token (get_token_valido), with the outbound HTTP calls mocked.
+token (authentication.services), with the outbound HTTP calls mocked: the
+refresh at the transport handed to google-auth, the Calendar calls with
+googleapiclient's HttpMockSequence.
 """
 
+import json
+from datetime import datetime, timedelta, timezone as dt_timezone
 from unittest import mock
+from urllib.parse import parse_qs, urlparse
 
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialToken
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
-from django.core.exceptions import MultipleObjectsReturned
 from django.db.models.signals import post_save
 from django.test import TestCase, override_settings
+from django.utils import timezone
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from googleapiclient.http import HttpMockSequence
 
 from authentication.models import Docente
-from authentication.services import get_token_valido
+from authentication.services import (
+    GoogleCredentialsError,
+    get_credentials,
+    list_calendars,
+    list_events,
+)
 from hooks.models import Hook
 
 
@@ -32,8 +45,8 @@ SHIB_HEADERS = {
 
 
 def _create_google_app():
-    """get_token_valido reads the Google SocialApp to refresh tokens, so the
-    tests that exercise it need a configured app row.
+    """get_credentials reads client id and secret from the Google SocialApp
+    linked to the token, so the tests that exercise it need a configured row.
     """
     app = SocialApp.objects.create(
         provider='google', name='google', client_id='cid', secret='secret')
@@ -155,12 +168,20 @@ class AvviaLoginGoogleTests(TestCase):
     """The page auto-submits a POST to allauth's provider login URL, which is
     what actually starts the OAuth handshake (a GET would stop on allauth's
     confirmation page). The handshake itself is not tested.
+
+    The form asks allauth for process=connect: the Google account is attached
+    to the user already in session (the Shibboleth one). With process=login
+    allauth would log that user out and enter as the owner of the Google
+    account, a different User without a Docente.
     """
 
     def setUp(self):
         _create_google_app()
+        self.user = User.objects.create_user(username='docente')
 
     def test_form_posts_to_allauth_with_next(self):
+        self.client.force_login(self.user)
+
         response = self.client.get(
             '/auth/avvia-login-google/', {'next': '/calendars/'})
 
@@ -169,13 +190,33 @@ class AvviaLoginGoogleTests(TestCase):
         self.assertContains(response, 'action="/accounts/google/login/')
         self.assertContains(response, 'name="next" value="/calendars/"')
 
+    def test_form_connects_instead_of_logging_in(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get('/auth/avvia-login-google/')
+
+        self.assertContains(response, 'process=connect')
+        self.assertNotContains(response, 'process=login')
+
     def test_missing_next_falls_back_to_home(self):
+        self.client.force_login(self.user)
+
         response = self.client.get('/auth/avvia-login-google/')
 
         self.assertContains(response, 'name="next" value="/index/"')
 
+    def test_anonymous_user_is_sent_to_login_url(self):
+        response = self.client.get('/auth/avvia-login-google/')
 
-class GetTokenValidoTests(TestCase):
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/index/?next=/auth/avvia-login-google/')
+
+
+class GetCredentialsTests(TestCase):
+    """The refresh goes through google-auth for real: only the transport
+    (authentication.services.Request) is replaced, so what is asserted is the
+    request google-auth would send to Google's token endpoint.
+    """
 
     def setUp(self):
         self.user = User.objects.create_user(username='docente')
@@ -184,76 +225,193 @@ class GetTokenValidoTests(TestCase):
             user=self.user, provider='google', uid='uid-1')
         self.token = SocialToken.objects.create(
             app=self.app, account=self.account,
-            token='access-old', token_secret='refresh-1')
+            token='access-old', token_secret='refresh-1',
+            expires_at=timezone.now() + timedelta(hours=1))
 
-    def _response(self, status_code, payload=None):
-        response = mock.Mock()
-        response.status_code = status_code
-        response.json.return_value = payload or {}
-        return response
+    def _expire(self):
+        self.token.expires_at = timezone.now() - timedelta(hours=1)
+        self.token.save()
 
-    @mock.patch('authentication.services.requests.post')
-    @mock.patch('authentication.services.requests.get')
-    def test_valid_token_is_returned_without_refresh(self, mock_get, mock_post):
-        mock_get.return_value = self._response(200)
+    def _transport(self, mock_request_cls, status, payload):
+        transport = mock_request_cls.return_value
+        transport.return_value = mock.Mock(
+            status=status, data=json.dumps(payload).encode())
+        return transport
 
-        self.assertEqual(get_token_valido(self.user), 'access-old')
-        mock_post.assert_not_called()
-        self.token.refresh_from_db()
-        self.assertEqual(self.token.token, 'access-old')
+    def _sent_form(self, transport):
+        body = transport.call_args.kwargs['body']
+        if isinstance(body, bytes):
+            body = body.decode()
+        return {key: values[0] for key, values in parse_qs(body).items()}
 
-    @mock.patch('authentication.services.requests.post')
-    @mock.patch('authentication.services.requests.get')
-    def test_expired_token_is_refreshed_and_persisted(self, mock_get, mock_post):
-        mock_get.return_value = self._response(401)
-        mock_post.return_value = self._response(200, {'access_token': 'access-new'})
+    @mock.patch('authentication.services.Request')
+    def test_unexpired_token_is_returned_without_refresh(self, mock_request_cls):
+        credentials = get_credentials(self.user)
 
-        self.assertEqual(get_token_valido(self.user), 'access-new')
+        self.assertEqual(credentials.token, 'access-old')
+        mock_request_cls.return_value.assert_not_called()
 
+    @mock.patch('authentication.services.Request')
+    def test_expired_token_is_refreshed_and_persisted(self, mock_request_cls):
+        self._expire()
+        transport = self._transport(
+            mock_request_cls, 200, {'access_token': 'access-new', 'expires_in': 3600})
+
+        credentials = get_credentials(self.user)
+
+        self.assertEqual(credentials.token, 'access-new')
         self.token.refresh_from_db()
         self.assertEqual(self.token.token, 'access-new')
-        sent = mock_post.call_args.kwargs['data']
+        self.assertEqual(self.token.token_secret, 'refresh-1')
+        self.assertGreater(self.token.expires_at, timezone.now())
+        sent = self._sent_form(transport)
         self.assertEqual(sent['refresh_token'], 'refresh-1')
         self.assertEqual(sent['grant_type'], 'refresh_token')
         self.assertEqual(sent['client_id'], 'cid')
+        self.assertEqual(sent['client_secret'], 'secret')
+        self.assertIsNotNone(transport.call_args.kwargs['timeout'])
 
-    @mock.patch('authentication.services.requests.post')
-    @mock.patch('authentication.services.requests.get')
-    def test_failed_refresh_raises_and_leaves_token_untouched(self, mock_get, mock_post):
-        mock_get.return_value = self._response(401)
-        mock_post.return_value = self._response(400, {'error': 'invalid_grant'})
+    @mock.patch('authentication.services.Request')
+    def test_token_without_known_expiry_is_refreshed(self, mock_request_cls):
+        """Rows written before expires_at was kept up to date: with no expiry
+        google-auth would consider the token valid forever.
+        """
+        self.token.expires_at = None
+        self.token.save()
+        self._transport(
+            mock_request_cls, 200, {'access_token': 'access-new', 'expires_in': 3600})
 
-        with self.assertRaises(Exception) as ctx:
-            get_token_valido(self.user)
-        self.assertIn('Impossibile rinnovare il token', str(ctx.exception))
+        self.assertEqual(get_credentials(self.user).token, 'access-new')
+        self.token.refresh_from_db()
+        self.assertIsNotNone(self.token.expires_at)
+
+    @mock.patch('authentication.services.Request')
+    def test_failed_refresh_raises_and_leaves_token_untouched(self, mock_request_cls):
+        self._expire()
+        self._transport(mock_request_cls, 400, {'error': 'invalid_grant'})
+
+        with self.assertRaises(GoogleCredentialsError):
+            get_credentials(self.user)
 
         self.token.refresh_from_db()
         self.assertEqual(self.token.token, 'access-old')
 
-    @mock.patch('authentication.services.requests.get')
-    def test_user_without_token_raises_does_not_exist(self, mock_get):
+    @mock.patch('authentication.services.Request')
+    def test_expired_token_without_refresh_token_raises(self, mock_request_cls):
+        self._expire()
+        self.token.token_secret = ''
+        self.token.save()
+
+        with self.assertRaises(GoogleCredentialsError):
+            get_credentials(self.user)
+        mock_request_cls.return_value.assert_not_called()
+
+    def test_user_without_token_raises(self):
         other = User.objects.create_user(username='senza-token')
 
-        with self.assertRaises(SocialToken.DoesNotExist):
-            get_token_valido(other)
-        mock_get.assert_not_called()
+        with self.assertRaises(GoogleCredentialsError):
+            get_credentials(other)
 
-    @mock.patch('authentication.services.requests.post')
-    @mock.patch('authentication.services.requests.get')
-    def test_duplicate_social_app_raises_multiple_objects_returned(
-            self, mock_get, mock_post):
-        """Documents open bug: a second google SocialApp row (a classic
-        result of loading a fixture on top of an admin-created app) makes the
-        refresh path explode with an error unrelated to the token, which the
-        bare except in SelectCalendarsView then reports as 'login again'.
+    @mock.patch('authentication.services.Request')
+    def test_duplicate_social_app_does_not_break_the_refresh(self, mock_request_cls):
+        """Client id and secret come from the app linked to the token, not from
+        a lookup by provider: a second google SocialApp row (a classic result
+        of loading a fixture on top of an admin-created app) is harmless.
         """
         SocialApp.objects.create(
             provider='google', name='google-dup', client_id='cid2', secret='s2')
-        mock_get.return_value = self._response(401)
+        self._expire()
+        transport = self._transport(
+            mock_request_cls, 200, {'access_token': 'access-new', 'expires_in': 3600})
 
-        with self.assertRaises(MultipleObjectsReturned):
-            get_token_valido(self.user)
-        mock_post.assert_not_called()
+        get_credentials(self.user)
+
+        self.assertEqual(self._sent_form(transport)['client_id'], 'cid')
+
+    def test_with_two_google_accounts_the_last_authorized_one_is_used(self):
+        second = SocialAccount.objects.create(
+            user=self.user, provider='google', uid='uid-2')
+        SocialToken.objects.create(
+            app=self.app, account=second,
+            token='access-second', token_secret='refresh-2',
+            expires_at=timezone.now() + timedelta(hours=1))
+
+        self.assertEqual(get_credentials(self.user).token, 'access-second')
+
+        # last_login is auto_now: saving the first account makes it the latest.
+        self.account.save()
+        self.assertEqual(get_credentials(self.user).token, 'access-old')
+
+
+class CalendarApiTests(TestCase):
+    """list_calendars/list_events against googleapiclient's HttpMockSequence:
+    the real client builds the requests, the canned responses replace Google.
+    """
+
+    def _service(self, *responses):
+        self.http = HttpMockSequence([
+            ({'status': str(status)}, json.dumps(payload))
+            for status, payload in responses
+        ])
+        return build('calendar', 'v3', http=self.http, cache_discovery=False)
+
+    def _query(self, index=-1):
+        return parse_qs(urlparse(self.http.request_sequence[index][0]).query)
+
+    def test_list_calendars_follows_every_page(self):
+        service = self._service(
+            (200, {'items': [{'id': 'a', 'summary': 'A'}], 'nextPageToken': 'p2'}),
+            (200, {'items': [{'id': 'b', 'summary': 'B'}]}),
+        )
+
+        calendars = list_calendars(service)
+
+        self.assertEqual([c['id'] for c in calendars], ['a', 'b'])
+        self.assertEqual(self._query()['pageToken'], ['p2'])
+
+    def test_list_calendars_without_items_is_empty(self):
+        self.assertEqual(list_calendars(self._service((200, {}))), [])
+
+    def test_list_events_merges_pages_and_keeps_calendar_metadata(self):
+        service = self._service(
+            (200, {'summary': 'Cal', 'timeZone': 'Europe/Rome',
+                   'items': [{'id': 'e1'}], 'nextPageToken': 'p2'}),
+            (200, {'summary': 'Cal', 'timeZone': 'Europe/Rome',
+                   'items': [{'id': 'e2'}]}),
+        )
+        start = datetime(2026, 10, 1, tzinfo=dt_timezone.utc)
+        end = datetime(2026, 11, 1, tzinfo=dt_timezone.utc)
+
+        data = list_events(service, 'cal@google.com', start, end)
+
+        self.assertEqual(data['summary'], 'Cal')
+        self.assertEqual(data['timeZone'], 'Europe/Rome')
+        self.assertEqual([e['id'] for e in data['items']], ['e1', 'e2'])
+        self.assertNotIn('nextPageToken', data)
+        first = self._query(0)
+        self.assertEqual(first['singleEvents'], ['true'])
+        self.assertEqual(first['timeMin'], [start.isoformat()])
+        self.assertEqual(first['timeMax'], [end.isoformat()])
+
+    def test_calendar_id_is_escaped_in_the_url(self):
+        """Holiday calendars have a '#' in the id: unescaped, everything after
+        it would be dropped as a URL fragment.
+        """
+        service = self._service((200, {'items': []}))
+        start = datetime(2026, 10, 1, tzinfo=dt_timezone.utc)
+
+        list_events(service, 'it.italian#holiday@group.v.calendar.google.com',
+                    start, start + timedelta(days=31))
+
+        path = urlparse(self.http.request_sequence[0][0]).path
+        self.assertIn('it.italian%23holiday%40group.v.calendar.google.com', path)
+
+    def test_calendar_refused_by_google_raises_http_error(self):
+        service = self._service((404, {'error': {'message': 'Not Found'}}))
+        start = datetime(2026, 10, 1, tzinfo=dt_timezone.utc)
+
+        with self.assertRaises(HttpError):
+            list_events(service, 'gone@google.com', start, start + timedelta(days=31))
 
 
 class HookProvisioningSignalTests(TestCase):

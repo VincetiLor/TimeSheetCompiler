@@ -9,7 +9,7 @@
 </head>
 <body class="flex min-h-screen items-center justify-center bg-fondo px-4 font-sans text-grigio">
 <form id="autoform" method="post"
-      action="{% provider_login_url 'google' process='login' %}"
+      action="{% provider_login_url 'google' process='connect' %}"
       class="text-center">
     {% csrf_token %}
     <input type="hidden" name="next" value="{{ next }}">
