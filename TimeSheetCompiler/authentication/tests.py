@@ -37,9 +37,10 @@ from hooks.models import Hook
 
 
 SHIB_HEADERS = {
-    'shib-givenname': 'Mario',
-    'shib-sn': 'Rossi',
-    'shib-unique-id': '4242',
+    'givenname': 'Mario',
+    'sn': 'Rossi',
+    'uid': '4242',
+    'affiliation': 'member@unimore.it;staff@unimore.it',
 }
 
 
@@ -85,7 +86,7 @@ class ShibbolethMiddlewareTests(TestCase):
         self.client.get('/index/', headers=SHIB_HEADERS)
         self.client.logout()
 
-        self.client.get('/index/', headers={**SHIB_HEADERS, 'shib-sn': 'Bianchi'})
+        self.client.get('/index/', headers={**SHIB_HEADERS, 'sn': 'Bianchi'})
 
         docente = Docente.objects.get(id_unimore=4242)
         self.assertEqual(docente.cognome, 'Bianchi')
@@ -98,14 +99,14 @@ class ShibbolethMiddlewareTests(TestCase):
         self.assertEqual(Docente.objects.count(), 0)
 
     def test_partial_headers_provision_nothing(self):
-        response = self.client.get('/index/', headers={'shib-unique-id': '4242'})
+        response = self.client.get('/index/', headers={'uid': '4242'})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Docente.objects.count(), 0)
 
     def test_non_numeric_id_provisions_nothing_but_serves_request(self):
         response = self.client.get(
-            '/index/', headers={**SHIB_HEADERS, 'shib-unique-id': 'not-a-number'})
+            '/index/', headers={**SHIB_HEADERS, 'uid': 'not-a-number'})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Docente.objects.count(), 0)
@@ -121,12 +122,73 @@ class ShibbolethMiddlewareTests(TestCase):
         self.assertEqual(User.objects.count(), 1)
 
 
+STUDENT_HEADERS = {
+    **SHIB_HEADERS,
+    'affiliation': 'member@unimore.it;student@unimore.it',
+}
+
+
+@override_settings(SHIBBOLETH_DEV_MODE=False, SHIBBOLETH_UID_IN_DEROGA=[])
+class ShibbolethAffiliationTests(TestCase):
+    """Only staff roles get in: the affiliation header is a ';' separated
+    list and one enabled role is enough. A uid listed in
+    SHIBBOLETH_UID_IN_DEROGA gets in whatever its affiliation.
+    """
+
+    def setUp(self):
+        _create_google_app()
+
+    def test_student_is_refused_and_nothing_is_provisioned(self):
+        response = self.client.get('/index/', headers=STUDENT_HEADERS)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTemplateUsed(response, 'authentication/accesso_negato.html')
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+        self.assertEqual(User.objects.count(), 0)
+        self.assertEqual(Docente.objects.count(), 0)
+
+    def test_each_enabled_role_gets_in(self):
+        for uid, ruolo in enumerate(('faculty', 'staff', 'employee'), start=1):
+            self.client.logout()
+            response = self.client.get('/index/', headers={
+                **SHIB_HEADERS,
+                'uid': str(uid),
+                'affiliation': f'member@unimore.it;{ruolo}@unimore.it',
+            })
+
+            self.assertEqual(response.status_code, 200, ruolo)
+            self.assertTrue(Docente.objects.filter(id_unimore=uid).exists(), ruolo)
+
+    def test_role_match_is_case_insensitive(self):
+        response = self.client.get(
+            '/index/', headers={**SHIB_HEADERS, 'affiliation': 'Staff@unimore.it'})
+
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(SHIBBOLETH_UID_IN_DEROGA=['4242'])
+    def test_uid_in_deroga_gets_in_as_student(self):
+        response = self.client.get('/index/', headers=STUDENT_HEADERS)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Docente.objects.filter(id_unimore=4242).exists())
+
+    def test_missing_affiliation_provisions_nothing(self):
+        headers = {k: v for k, v in SHIB_HEADERS.items() if k != 'affiliation'}
+
+        response = self.client.get('/index/', headers=headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+        self.assertEqual(Docente.objects.count(), 0)
+
+
 @override_settings(
     SHIBBOLETH_DEV_MODE=True,
     SHIBBOLETH_DEV_FAKE_HEADERS={
-        'HTTP_SHIB_GIVENNAME': 'Dev',
-        'HTTP_SHIB_SN': 'Tester',
-        'HTTP_SHIB_UNIQUE_ID': '1',
+        'HTTP_GIVENNAME': 'Dev',
+        'HTTP_SN': 'Tester',
+        'HTTP_UID': '1',
+        'HTTP_AFFILIATION': 'staff@unimore.it',
     },
 )
 class ShibbolethDevModeTests(TestCase):
@@ -151,7 +213,7 @@ class ShibbolethDevModeTests(TestCase):
         A partially-configured SP would silently log everyone in as the same
         dev identity. Pinned here so the merge order cannot change unnoticed.
         """
-        self.client.get('/index/', headers={'shib-unique-id': '999'})
+        self.client.get('/index/', headers={'uid': '999'})
 
         self.assertFalse(Docente.objects.filter(id_unimore=999).exists())
         self.assertTrue(Docente.objects.filter(id_unimore=1).exists())

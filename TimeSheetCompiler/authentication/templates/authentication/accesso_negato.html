@@ -1,0 +1,13 @@
+{% extends "index.html" %}
+
+{% block titolo %}Accesso non consentito{% endblock %}
+
+{% block content %}
+<section class="max-w-2xl">
+    <h1 class="font-serif text-4xl leading-tight text-inchiostro">Accesso non consentito</h1>
+    <p class="mt-6 max-w-xl text-lg leading-relaxed">
+        Timesheet Compiler è riservato al personale di ateneo. Il tuo account
+        risulta registrato come: {{ affiliazione }}.
+    </p>
+</section>
+{% endblock %}

@@ -87,23 +87,34 @@ MIDDLEWARE = [
 ]
 
 
-# Shibboleth pre-auth (container SP injects these as request headers before
-# the request reaches Django). Header names are a guess pending the real
-# attribute-map from the SP config - update here, not in the middleware code.
+# Shibboleth pre-auth: il container SP inietta gli attributi come header prima
+# che la richiesta arrivi a Django. I nomi si cambiano qui, non nel middleware.
 SHIBBOLETH_HEADER_MAP = {
-    'nome': 'HTTP_SHIB_GIVENNAME',
-    'cognome': 'HTTP_SHIB_SN',
-    'id_unimore': 'HTTP_SHIB_UNIQUE_ID',
+    'nome': 'HTTP_GIVENNAME',
+    'cognome': 'HTTP_SN',
+    'id_unimore': 'HTTP_UID',
+    'affiliation': 'HTTP_AFFILIATION',
 }
+
+# Chi puo' entrare: l'header affiliation e' una lista separata da ';'
+# (es. "member@unimore.it;staff@unimore.it") e basta un ruolo abilitato.
+SHIBBOLETH_RUOLI_ABILITATI = ('faculty', 'staff', 'employee')
+
+# uid che entrano comunque, qualunque sia l'affiliazione (lista separata da virgole).
+SHIBBOLETH_UID_IN_DEROGA = [
+    u.strip() for u in os.environ.get('UID_IN_DEROGA', '').split(',') if u.strip()
+]
 
 # Dev-only bypass: when the Shib container isn't running locally, fake the
 # headers it would have injected. Hard-gated behind DEBUG so this can never
 # fire in production even if the env var is left set by mistake.
 SHIBBOLETH_DEV_MODE = DEBUG and os.environ.get('SHIBBOLETH_DEV_MODE') == 'True'
 SHIBBOLETH_DEV_FAKE_HEADERS = {
-    'HTTP_SHIB_GIVENNAME': os.environ.get('SHIBBOLETH_DEV_NOME', 'Mario'),
-    'HTTP_SHIB_SN': os.environ.get('SHIBBOLETH_DEV_COGNOME', 'Rossi'),
-    'HTTP_SHIB_UNIQUE_ID': os.environ.get('SHIBBOLETH_DEV_ID', '1'),
+    'HTTP_GIVENNAME': os.environ.get('SHIBBOLETH_DEV_NOME', 'Mario'),
+    'HTTP_SN': os.environ.get('SHIBBOLETH_DEV_COGNOME', 'Rossi'),
+    'HTTP_UID': os.environ.get('SHIBBOLETH_DEV_ID', '1'),
+    'HTTP_AFFILIATION': os.environ.get(
+        'SHIBBOLETH_DEV_AFFILIATION', 'member@unimore.it;staff@unimore.it'),
 }
 
 ROOT_URLCONF = 'mysite.urls'
