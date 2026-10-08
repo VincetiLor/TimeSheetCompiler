@@ -22,6 +22,10 @@
     da sistemare, quindi hanno un riquadro tratteggiato come le funzioni non
     ancora pronte della home e un rimando alle regole.
     {% endcomment %}
+    {% for message in messages %}
+    <p role="alert" class="mt-8 rounded-md border border-linea bg-superficie px-5 py-3 font-semibold text-inchiostro">{{ message }}</p>
+    {% endfor %}
+
     <section aria-labelledby="classificati" class="mt-12">
         <h2 id="classificati" class="font-serif text-2xl text-inchiostro">
             Classificati <span class="text-grigio">({{ eventi_classificati|length }})</span>
@@ -61,11 +65,17 @@
             <div class="mt-4 rounded-lg border border-dashed border-linea">
                 {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_incerti categoria=False scelta=True %}
             </div>
-            <div class="mt-4 flex">
+            <div class="mt-4 flex flex-wrap gap-3">
                 <button type="submit" class="h-11 rounded-md border border-bosco bg-carta px-6 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
                     Salva classificazioni
                 </button>
+                <button type="submit" form="classifica-ai" class="h-11 rounded-md border border-bosco bg-carta px-6 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                    Classifica con AI
+                </button>
             </div>
+        </form>
+        <form id="classifica-ai" method="post" action="{% url 'classificationpipeline:classifica_incerti_ai' %}">
+            {% csrf_token %}
         </form>
         {% else %}
         <div class="mt-4 rounded-lg border border-dashed border-linea">

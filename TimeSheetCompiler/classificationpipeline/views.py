@@ -16,7 +16,10 @@ from authentication.services import (
     list_events,
 )
 from django.db import transaction
+from django.contrib import messages
+from django.views.decorators.http import require_POST
 from googleapiclient.errors import HttpError
+from .services import LLMClassificationError, classify_events
 
 
 MESI = [
@@ -217,3 +220,35 @@ def classifica_incerti(request):
 
     return redirect('classificationpipeline:event_compare')
 
+
+
+@login_required
+@require_POST
+def classifica_incerti_ai(request):
+
+    first_of_this_month = expiry_cutoff()
+    first_of_next_month = (first_of_this_month + timedelta(days=32)).replace(day=1)
+
+    events = list(Event.objects.filter(
+        calendar__docente=request.user.docente,
+        status=Event.Status.INCERTO,
+        start_time__gte=first_of_this_month,
+        start_time__lt=first_of_next_month,
+    ))
+
+    try:
+        choices = classify_events(events)
+    except LLMClassificationError:
+        messages.error(request, "Classificazione automatica non disponibile, riprova piu' tardi.")
+        return redirect('classificationpipeline:event_compare')
+
+    classified = []
+    for event in events:
+        if event.pk in choices:
+            event.category = choices[event.pk]
+            event.status = Event.Status.CLASSIFICATO
+            classified.append(event)
+
+    Event.objects.bulk_update(classified, ['category', 'status'])
+
+    return redirect('classificationpipeline:event_compare')

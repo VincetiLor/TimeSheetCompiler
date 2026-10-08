@@ -117,6 +117,11 @@ SHIBBOLETH_DEV_FAKE_HEADERS = {
         'SHIBBOLETH_DEV_AFFILIATION', 'member@unimore.it;staff@unimore.it'),
 }
 
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')
+OPENAI_TIMEOUT = float(os.environ.get('OPENAI_TIMEOUT', '30'))
+LLM_CONFIDENCE_THRESHOLD = int(os.environ.get('LLM_CONFIDENCE_THRESHOLD', '70'))
+
 ROOT_URLCONF = 'mysite.urls'
 
 TEMPLATES = [
