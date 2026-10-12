@@ -10,12 +10,26 @@ volta. Si disattiva con --nobrowser.
 """
 
 import os
+import socket
 import threading
+import time
 import webbrowser
 
 from django.contrib.staticfiles.management.commands.runserver import (
     Command as StaticfilesRunserverCommand,
 )
+
+
+def open_when_ready(host, port, url):
+    for attempt in range(300):
+        try:
+            connection = socket.create_connection((host, port), timeout=0.5)
+        except OSError:
+            time.sleep(0.1)
+            continue
+        connection.close()
+        webbrowser.open(url)
+        return
 
 
 class Command(StaticfilesRunserverCommand):
@@ -39,6 +53,9 @@ class Command(StaticfilesRunserverCommand):
             else:
                 host = self.addr
             url = f'http://{host}:{self.port}/index/'
-            # Ritardo per dare tempo al server di mettersi in ascolto.
-            threading.Timer(1.5, webbrowser.open, args=(url,)).start()
+            threading.Thread(
+                target=open_when_ready,
+                args=(host.strip('[]'), int(self.port), url),
+                daemon=True,
+            ).start()
         super().run(**options)

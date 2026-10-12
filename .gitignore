@@ -12,11 +12,10 @@ __pycache__/
 !.env.example
 dump.json
 .vscode
+
 # Log delle run schedulate (cron)
 TimeSheetCompiler/logs/
-
+# Output di collectstatic
+TimeSheetCompiler/staticfiles/
 # Binario Tailwind CLI standalone (scaricato, non versionato)
 TimeSheetCompiler/bin/
-
-# Claude Code personal settings
-.claude/settings.local.json

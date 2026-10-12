@@ -28,12 +28,16 @@ load_dotenv(BASE_DIR / os.environ.get('DJANGO_ENV_FILE', '.env.dev'))
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-i-)o#i$9m-7h%y^&%-)lvm*i5x_zo%2tq!lz6if4me7gnu&bad'
+SECRET_KEY = os.environ['DJANGO_SECRET_KEY']
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG') == 'True'
 
 ALLOWED_HOSTS = []
+for host in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(','):
+    host = host.strip()
+    if host:
+        ALLOWED_HOSTS.append(host)
 
 
 # Application definition
@@ -152,7 +156,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB_NAME', 'timesheet'),
         'USER': os.environ.get('DB_USER', 'timesheet'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+        'PASSWORD': os.environ.get('DB_PASSWORD'),
         'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
         'PORT': os.environ.get('DB_PORT', '5432'),
     }
@@ -204,6 +208,8 @@ STATIC_URL = 'static/'
 # partendo da tailwind/input.css. Il file generato e' committato: in produzione
 # Tailwind non serve, basta collectstatic.
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 
 SOCIALACCOUNT_PROVIDERS = {

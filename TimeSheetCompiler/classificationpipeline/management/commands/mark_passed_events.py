@@ -1,13 +1,8 @@
 """Promuove a 'passato' gli eventi che hanno superato il termine di consegna.
-
-Pensato per girare ogni notte da uno scheduler (cron o django-crontab): il
-command e' idempotente, quindi le run nei giorni in cui non scade nulla non
-fanno niente e non costa tenerlo giornaliero invece che mensile. Girare solo il
-giorno 8 significherebbe perdere il giro se quella notte la macchina e' spenta.
+Pensato per girare dal 8 al 12 notte da uno scheduler (cron o django-crontab)
 """
 
 from django.core.management.base import BaseCommand
-
 from classificationpipeline.models import Event, expiry_cutoff
 
 
@@ -32,8 +27,7 @@ class Command(BaseCommand):
             )
             return
 
-        # update() e' una singola UPDATE ... WHERE: nessun oggetto Python
-        # istanziato e nessun signal post_save per riga.
+        # update() e' una singola UPDATE
         updated = expired.update(status=Event.Status.PASSATO)
 
         self.stdout.write(self.style.SUCCESS(

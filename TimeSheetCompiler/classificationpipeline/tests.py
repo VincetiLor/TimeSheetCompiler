@@ -4,24 +4,31 @@ comparison entry point, models and the expiry job.
 No call actually leaves the process in SelectCalendarsViewTests or
 EventCompareTests: the Google helpers of authentication.services
 (get_calendar_service, list_calendars, list_events) are patched where
-classificationpipeline.views imports them.
+classificationpipeline.views imports them. The same holds for OpenAI: the
+client class is patched in ClassifyEventsTests, the whole classify_events
+function in ClassificaIncertiAiTests.
 """
 
+import json
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from io import StringIO
+from types import SimpleNamespace
 from unittest import mock
 
 import httplib2
 from django.contrib.auth.models import User
+from django.contrib.messages import get_messages
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from googleapiclient.errors import HttpError
+from openai import OpenAIError
 
 from authentication.models import Docente
 from authentication.services import GoogleCredentialsError
 from classificationpipeline.models import Calendar, Event, expiry_cutoff
+from classificationpipeline.services import LLMClassificationError, classify_events
 from classificationpipeline.views import MESI
 
 
@@ -947,3 +954,378 @@ class ClassificaIncertiTests(TestCase):
 
         event.refresh_from_db()
         self.assertEqual(event.category, Event.Category.DIDATTICA)
+
+
+@override_settings(
+    OPENAI_API_KEY='chiave-di-test', OPENAI_MODEL='modello-di-test',
+    OPENAI_TIMEOUT=12.0, LLM_CONFIDENCE_THRESHOLD=70)
+class ClassifyEventsTests(TestCase):
+    """classify_events sends every event in a single request and returns
+    {pk: category}. It never writes to the database. OpenAI is never reached:
+    the client class is patched where classificationpipeline.services imports
+    it, and the reply is built by hand with the same shape as the real one.
+    """
+
+    def setUp(self):
+        user = User.objects.create_user(username='docente')
+        docente = Docente.objects.create(
+            user=user, id_unimore=4242, cognome='Rossi')
+        self.calendar = Calendar.objects.create(
+            docente=docente, calendar_id='cal-a@google.com', title='Didattica')
+        self.lezione = self._event('evt-1', 'Lezione di Analisi', 'Aula M1.4')
+        self.riunione = self._event('evt-2', 'Riunione di dipartimento', None)
+
+    def _event(self, event_id, title, description):
+        return Event.objects.create(
+            calendar=self.calendar, event_id=event_id, title=title,
+            description=description,
+            start_time='2026-09-01T09:00:00Z', end_time='2026-09-01T11:00:00Z')
+
+    def _reply(self, content, finish_reason='stop'):
+        message = SimpleNamespace(content=content)
+        choice = SimpleNamespace(finish_reason=finish_reason, message=message)
+        return SimpleNamespace(choices=[choice])
+
+    def _rows(self, *rows):
+        eventi = []
+        for pk, category in rows:
+            eventi.append({'id': pk, 'category': category})
+        return self._reply(json.dumps({'eventi': eventi}))
+
+    def _create(self, mock_openai):
+        return mock_openai.return_value.chat.completions.create
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_no_events_returns_empty_without_building_a_client(self, mock_openai):
+        self.assertEqual(classify_events([]), {})
+        mock_openai.assert_not_called()
+
+    @override_settings(OPENAI_API_KEY='')
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_missing_api_key_raises_without_building_a_client(self, mock_openai):
+        with self.assertRaises(LLMClassificationError):
+            classify_events([self.lezione])
+        mock_openai.assert_not_called()
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_each_event_gets_the_category_returned_for_its_id(self, mock_openai):
+        self._create(mock_openai).return_value = self._rows(
+            (self.lezione.pk, 'didattica'), (self.riunione.pk, 'ricerca_base'))
+
+        result = classify_events([self.lezione, self.riunione])
+
+        self.assertEqual(result, {
+            self.lezione.pk: 'didattica', self.riunione.pk: 'ricerca_base'})
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_all_events_travel_in_a_single_request(self, mock_openai):
+        self._create(mock_openai).return_value = self._rows()
+
+        classify_events([self.lezione, self.riunione])
+
+        self.assertEqual(self._create(mock_openai).call_count, 1)
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_a_null_category_leaves_the_event_out_of_the_result(self, mock_openai):
+        self._create(mock_openai).return_value = self._rows(
+            (self.lezione.pk, 'didattica'), (self.riunione.pk, None))
+
+        result = classify_events([self.lezione, self.riunione])
+
+        self.assertEqual(result, {self.lezione.pk: 'didattica'})
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_an_id_that_was_not_sent_is_discarded(self, mock_openai):
+        not_sent = self.riunione.pk
+        self._create(mock_openai).return_value = self._rows(
+            (self.lezione.pk, 'didattica'), (not_sent, 'didattica'))
+
+        result = classify_events([self.lezione])
+
+        self.assertEqual(result, {self.lezione.pk: 'didattica'})
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_an_unknown_category_is_discarded(self, mock_openai):
+        self._create(mock_openai).return_value = self._rows(
+            (self.lezione.pk, 'vacanza'))
+
+        self.assertEqual(classify_events([self.lezione]), {})
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_the_database_is_not_touched(self, mock_openai):
+        self._create(mock_openai).return_value = self._rows(
+            (self.lezione.pk, 'didattica'))
+
+        classify_events([self.lezione])
+
+        self.lezione.refresh_from_db()
+        self.assertEqual(self.lezione.status, Event.Status.INCERTO)
+        self.assertEqual(self.lezione.category, '')
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_client_and_request_use_the_configured_settings(self, mock_openai):
+        self._create(mock_openai).return_value = self._rows()
+
+        classify_events([self.lezione])
+
+        client_kwargs = mock_openai.call_args.kwargs
+        self.assertEqual(client_kwargs['api_key'], 'chiave-di-test')
+        self.assertEqual(client_kwargs['timeout'], 12.0)
+        request_kwargs = self._create(mock_openai).call_args.kwargs
+        self.assertEqual(request_kwargs['model'], 'modello-di-test')
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_prompt_carries_threshold_categories_and_event_fields(self, mock_openai):
+        self._create(mock_openai).return_value = self._rows()
+
+        classify_events([self.lezione, self.riunione])
+
+        messages = self._create(mock_openai).call_args.kwargs['messages']
+        system, user = messages[0], messages[1]
+        self.assertEqual(system['role'], 'system')
+        self.assertIn('70%', system['content'])
+        self.assertEqual(user['role'], 'user')
+        for code in Event.Category.values:
+            self.assertIn(code, user['content'])
+        self.assertIn(f'id {self.lezione.pk}', user['content'])
+        self.assertIn('Lezione di Analisi', user['content'])
+        self.assertIn('Aula M1.4', user['content'])
+        self.assertIn('Riunione di dipartimento', user['content'])
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_a_missing_description_is_sent_as_empty_text(self, mock_openai):
+        self._create(mock_openai).return_value = self._rows()
+
+        classify_events([self.riunione])
+
+        user = self._create(mock_openai).call_args.kwargs['messages'][1]
+        self.assertNotIn('None', user['content'])
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_the_response_schema_allows_only_known_categories_or_null(
+            self, mock_openai):
+        self._create(mock_openai).return_value = self._rows()
+
+        classify_events([self.lezione])
+
+        response_format = self._create(mock_openai).call_args.kwargs['response_format']
+        schema = response_format['json_schema']['schema']
+        allowed = schema['properties']['eventi']['items']['properties']['category']['enum']
+        self.assertEqual(set(allowed), set(Event.Category.values) | {None})
+        self.assertTrue(response_format['json_schema']['strict'])
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_an_openai_failure_becomes_a_classification_error(self, mock_openai):
+        self._create(mock_openai).side_effect = OpenAIError('rete assente')
+
+        with self.assertRaises(LLMClassificationError):
+            classify_events([self.lezione])
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_a_truncated_reply_is_rejected(self, mock_openai):
+        content = json.dumps(
+            {'eventi': [{'id': self.lezione.pk, 'category': 'didattica'}]})
+        self._create(mock_openai).return_value = self._reply(
+            content, finish_reason='length')
+
+        with self.assertRaises(LLMClassificationError):
+            classify_events([self.lezione])
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_an_empty_reply_is_rejected(self, mock_openai):
+        self._create(mock_openai).return_value = self._reply('')
+
+        with self.assertRaises(LLMClassificationError):
+            classify_events([self.lezione])
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_a_reply_that_is_not_json_is_rejected(self, mock_openai):
+        self._create(mock_openai).return_value = self._reply('didattica')
+
+        with self.assertRaises(LLMClassificationError):
+            classify_events([self.lezione])
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_a_reply_without_the_events_list_is_rejected(self, mock_openai):
+        self._create(mock_openai).return_value = self._reply(
+            json.dumps({'altro': []}))
+
+        with self.assertRaises(LLMClassificationError):
+            classify_events([self.lezione])
+
+    @mock.patch('classificationpipeline.services.OpenAI')
+    def test_a_row_without_id_is_not_turned_into_a_classification_error_known_gap(
+            self, mock_openai):
+        self._create(mock_openai).return_value = self._reply(
+            json.dumps({'eventi': [{'category': 'didattica'}]}))
+
+        with self.assertRaises(KeyError):
+            classify_events([self.lezione])
+
+
+@override_settings(SHIBBOLETH_DEV_MODE=False)
+class ClassificaIncertiAiTests(TestCase):
+    """The "Classifica con AI" button posts here: the view hands to
+    classify_events the logged docente's incerto events of the worked month and
+    saves the categories it gets back. classify_events is patched where
+    classificationpipeline.views imports it.
+    """
+
+    URL = '/events/classifica-ai/'
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='docente')
+        self.docente = Docente.objects.create(
+            user=self.user, id_unimore=4242, cognome='Rossi')
+        self.calendar = Calendar.objects.create(
+            docente=self.docente, calendar_id='cal-a@google.com', title='Didattica')
+        self.in_month = timezone.localtime(expiry_cutoff()).replace(
+            day=2, hour=10, minute=0, second=0, microsecond=0)
+
+    def _event(self, event_id, calendar=None, start=None, **kwargs):
+        start = start or self.in_month
+        return Event.objects.create(
+            calendar=calendar or self.calendar, event_id=event_id, title='Riunione',
+            start_time=start, end_time=start + timedelta(hours=2),
+            **_with_category(kwargs))
+
+    def _sent_pks(self, mock_classify):
+        pks = []
+        for event in mock_classify.call_args.args[0]:
+            pks.append(event.pk)
+        return sorted(pks)
+
+    @mock.patch('classificationpipeline.views.classify_events')
+    def test_anonymous_post_is_redirected_to_login_before_any_call(
+            self, mock_classify):
+        self._event('evt-1')
+
+        response = self.client.post(self.URL)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f'/index/?next={self.URL}')
+        mock_classify.assert_not_called()
+
+    @mock.patch('classificationpipeline.views.classify_events')
+    def test_get_is_rejected_before_any_call(self, mock_classify):
+        self._event('evt-1')
+        self.client.force_login(self.user)
+
+        response = self.client.get(self.URL)
+
+        self.assertEqual(response.status_code, 405)
+        mock_classify.assert_not_called()
+
+    @mock.patch('classificationpipeline.views.classify_events')
+    def test_returned_categories_are_saved_and_user_goes_back_to_compare(
+            self, mock_classify):
+        first = self._event('evt-1')
+        second = self._event('evt-2')
+        mock_classify.return_value = {
+            first.pk: Event.Category.DIDATTICA,
+            second.pk: Event.Category.RICERCA_FINANZIATA,
+        }
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.URL)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/events/')
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.status, Event.Status.CLASSIFICATO)
+        self.assertEqual(first.category, Event.Category.DIDATTICA)
+        self.assertEqual(second.status, Event.Status.CLASSIFICATO)
+        self.assertEqual(second.category, Event.Category.RICERCA_FINANZIATA)
+
+    @mock.patch('classificationpipeline.views.classify_events')
+    def test_an_event_missing_from_the_result_stays_incerto(self, mock_classify):
+        classified = self._event('evt-1')
+        below_threshold = self._event('evt-2')
+        mock_classify.return_value = {classified.pk: Event.Category.DIDATTICA}
+        self.client.force_login(self.user)
+
+        self.client.post(self.URL)
+
+        below_threshold.refresh_from_db()
+        self.assertEqual(below_threshold.status, Event.Status.INCERTO)
+        self.assertEqual(below_threshold.category, '')
+
+    @mock.patch('classificationpipeline.views.classify_events')
+    def test_only_own_incerto_events_of_the_worked_month_are_sent(
+            self, mock_classify):
+        mock_classify.return_value = {}
+        own = self._event('evt-1')
+        self._event('evt-2', status=Event.Status.CLASSIFICATO)
+        self._event('evt-3', status=Event.Status.COMPILATO)
+        self._event('evt-4', start=expiry_cutoff() - timedelta(days=5))
+        self._event('evt-5', start=self.in_month + timedelta(days=40))
+        other_user = User.objects.create_user(username='altro')
+        other_docente = Docente.objects.create(
+            user=other_user, id_unimore=4343, cognome='Bianchi')
+        other_calendar = Calendar.objects.create(
+            docente=other_docente, calendar_id='cal-b@google.com', title='Ricerca')
+        self._event('evt-6', calendar=other_calendar)
+        self.client.force_login(self.user)
+
+        self.client.post(self.URL)
+
+        self.assertEqual(self._sent_pks(mock_classify), [own.pk])
+
+    @mock.patch('classificationpipeline.views.classify_events')
+    def test_a_result_for_an_event_that_was_not_sent_is_ignored(
+            self, mock_classify):
+        other_user = User.objects.create_user(username='altro')
+        other_docente = Docente.objects.create(
+            user=other_user, id_unimore=4343, cognome='Bianchi')
+        other_calendar = Calendar.objects.create(
+            docente=other_docente, calendar_id='cal-b@google.com', title='Ricerca')
+        foreign = self._event('evt-1', calendar=other_calendar)
+        mock_classify.return_value = {foreign.pk: Event.Category.DIDATTICA}
+        self.client.force_login(self.user)
+
+        self.client.post(self.URL)
+
+        foreign.refresh_from_db()
+        self.assertEqual(foreign.status, Event.Status.INCERTO)
+        self.assertEqual(foreign.category, '')
+
+    @mock.patch('classificationpipeline.views.classify_events')
+    def test_a_failed_classification_changes_nothing_and_warns_the_user(
+            self, mock_classify):
+        event = self._event('evt-1')
+        mock_classify.side_effect = LLMClassificationError('rete assente')
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.URL)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/events/')
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.INCERTO)
+        texts = []
+        for message in get_messages(response.wsgi_request):
+            texts.append(str(message))
+        self.assertEqual(len(texts), 1)
+        self.assertIn('non disponibile', texts[0])
+
+    @mock.patch('classificationpipeline.views.classify_events')
+    def test_a_successful_classification_leaves_no_message(self, mock_classify):
+        event = self._event('evt-1')
+        mock_classify.return_value = {event.pk: Event.Category.DIDATTICA}
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.URL)
+
+        self.assertEqual(list(get_messages(response.wsgi_request)), [])
+
+    @override_settings(OPENAI_API_KEY='')
+    def test_without_incerto_events_the_real_service_is_never_configured(self):
+        self._event('evt-1', status=Event.Status.CLASSIFICATO)
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.URL)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/events/')
+        self.assertEqual(list(get_messages(response.wsgi_request)), [])

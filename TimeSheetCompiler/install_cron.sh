@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Installa (o aggiorna) la voce di crontab utente che promuove a 'passato' gli
-# eventi fuori tempo massimo. Idempotente: rilanciarlo non duplica la riga.
+# Installa la voce di crontab utente che promuove a 'passato' gli
+
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,7 +14,7 @@ if [ ! -x "$WRAPPER" ]; then
 fi
 
 CRON_TZ="$(date +%Z)"
-echo "Timezone di sistema: $CRON_TZ (cron usa questa, non TIME_ZONE di Django)"
+echo "Timezone di sistema: $CRON_TZ"
 echo "Schedule: $SCHEDULE  ->  $WRAPPER"
 
 # Backup della crontab attuale prima di riscriverla: questo script sostituisce
@@ -26,12 +26,10 @@ crontab -l > "$BACKUP_FILE" 2>/dev/null || : > "$BACKUP_FILE"
 echo "Backup della crontab attuale: $BACKUP_FILE"
 echo "Per ripristinarla:  crontab $BACKUP_FILE"
 
-# Rimuove l'eventuale voce precedente (riga marker + riga del wrapper) e
-# riscrive in coda quella nuova.
+# Rimuove l'eventuale voce precedente (riga marker + riga del wrapper) e riscrive in coda quella nuova.
 CURRENT="$(cat "$BACKUP_FILE")"
 # Si filtra sul *nome* dello script, non sul percorso completo: cosi' una voce
-# installata da una copia precedente del progetto viene sostituita invece di
-# restare accanto alla nuova e far girare il job due volte.
+# installata da una copia precedente del progetto viene sostituita
 WRAPPER_NAME="$(basename "$WRAPPER")"
 CLEANED="$(printf '%s\n' "$CURRENT" | grep -v -F "$MARKER" | grep -v -F "$WRAPPER_NAME" || true)"
 
@@ -45,5 +43,5 @@ echo "Installato. Voce attuale:"
 crontab -l | grep -A1 -F "$MARKER"
 echo
 echo "Log: $PROJECT_DIR/logs/mark_passed_events.log"
-echo "Prova a secco (non scrive nulla):"
+echo "Prova senza scrittura:"
 echo "  $WRAPPER --dry-run && tail -5 $PROJECT_DIR/logs/mark_passed_events.log"

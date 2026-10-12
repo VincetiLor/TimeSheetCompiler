@@ -144,7 +144,6 @@ def event_compare(request):
                     },
                 )
 
-                #print(event['summary'], event['id'])
                 if event_obj.status != Event.Status.INCERTO:
                     continue
                 title = event.get('summary', '').lower()
@@ -157,12 +156,7 @@ def event_compare(request):
                     event_obj.category = found_category
                     event_obj.status = Event.Status.CLASSIFICATO
                     event_obj.save(update_fields=['category', 'status'])
-                    print(
-                        f"[classificato] {event_obj.title} | "
-                        f"{event_obj.start_time:%d/%m %H:%M}-{event_obj.end_time:%H:%M} | "
-                        f"{found_category}"
-                    )
-                    
+
         eventi = (
             Event.objects
             .filter(
