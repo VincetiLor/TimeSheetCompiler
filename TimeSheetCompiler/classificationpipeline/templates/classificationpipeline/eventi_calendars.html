@@ -4,15 +4,15 @@
 
 {% block content %}
 <div class="max-w-3xl">
-    <a href="{% url 'index' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
+    <a href="{% url 'classificationpipeline:timesheet_list' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
         <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4"><path d="M16 10H4M9 5l-5 5 5 5"/></svg>
-        Torna alla home
+        Torna ai timesheet
     </a>
 
     <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Calendari</h1>
     <p class="mt-4 max-w-xl text-lg leading-relaxed">
-        Scegli fino a tre Google Calendar. Leggiamo gli eventi di questo mese e
-        li classifichiamo con le tue
+        Scegli fino a tre Google Calendar. Leggiamo gli eventi dal
+        {{ start|date:"d/m/Y" }} al {{ end|date:"d/m/Y" }} e li classifichiamo con le tue
         <a href="{% url 'settings' %}" class="font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 hover:decoration-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">regole di classificazione</a>.
     </p>
 
@@ -22,7 +22,7 @@
         Calendar e ricarica questa pagina.
     </div>
     {% else %}
-    <form method="post" id="form-calendari" action="{% url 'classificationpipeline:event_compare' %}" class="mt-10" novalidate>
+    <form method="post" id="form-calendari" action="{{ import_url }}" class="mt-10" novalidate>
         {% csrf_token %}
 
         <p id="errore-calendari" role="alert" class="mb-6 hidden rounded-md border border-red-300 bg-red-50 px-5 py-4 text-red-800"></p>

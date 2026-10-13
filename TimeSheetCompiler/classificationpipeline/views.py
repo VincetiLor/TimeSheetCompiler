@@ -1,14 +1,17 @@
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.shortcuts import redirect, render
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
+from django.utils.http import urlencode
 from django.views.generic import TemplateView
 from django.conf import settings
-from django.utils import timezone
-from datetime import datetime, timedelta
+from calendar import monthrange
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from hooks.models import Hook
-from .models import Calendar, Event, expiry_cutoff
+from .models import Event, Timesheet
 from authentication.services import (
     GoogleCredentialsError,
     get_calendar_service,
@@ -16,16 +19,119 @@ from authentication.services import (
     list_events,
 )
 from django.db import transaction
+from django.db.models import Count, Q
 from django.contrib import messages
 from django.views.decorators.http import require_POST
 from googleapiclient.errors import HttpError
-from .services import LLMClassificationError, classify_events
+from .services import LLMClassificationError, ai_classificator
 
 
-MESI = [
-    'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
-    'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
-]
+def get_timesheet(request, timesheet_id):
+    return get_object_or_404(
+        Timesheet, pk=timesheet_id, docente=request.user.docente)
+
+
+def get_open_timesheet(request, timesheet_id):
+    timesheet = get_timesheet(request, timesheet_id)
+    if not timesheet.is_open:
+        raise PermissionDenied
+    return timesheet
+
+
+def get_work_range(request, timesheet):
+    # Working range from ?start=YYYY-MM-DD&end=YYYY-MM-DD, None if not valid
+    try:
+        start = date.fromisoformat(request.GET.get('start', ''))
+        end = date.fromisoformat(request.GET.get('end', ''))
+    except ValueError:
+        return None
+    if start > end:
+        return None
+    if start < timesheet.start_date or end > timesheet.end_date:
+        return None
+    return start, end
+
+
+def range_bounds(start, end):
+    # The end date is included: the upper bound is the midnight after it
+    tz = timezone.get_current_timezone()
+    time_min = datetime.combine(start, time.min, tzinfo=tz)
+    time_max = datetime.combine(end + timedelta(days=1), time.min, tzinfo=tz)
+    return time_min, time_max
+
+
+def events_in_range(timesheet, start, end):
+    time_min, time_max = range_bounds(start, end)
+    return timesheet.events.filter(
+        start_time__gte=time_min,
+        start_time__lt=time_max,
+    ).order_by('start_time')
+
+
+def page_url(name, timesheet, start, end):
+    url = reverse(name, args=[timesheet.pk])
+    query = urlencode({'start': start.isoformat(), 'end': end.isoformat()})
+    return f"{url}?{query}"
+
+
+def invalid_range(request):
+    messages.error(request, "Scegli un intervallo di date dentro il periodo del timesheet.")
+    return redirect('classificationpipeline:timesheet_list')
+
+
+def parse_month(value):
+    # '2026-03' -> date(2026, 3, 1), None if not valid
+    try:
+        return datetime.strptime(value, '%Y-%m').date()
+    except ValueError:
+        return None
+
+
+@login_required
+def timesheet_list(request):
+    timesheets = Timesheet.objects.filter(docente=request.user.docente).annotate(
+        compiled_count=Count(
+            'events', filter=Q(events__status=Event.Status.COMPILATO)),
+    )
+    return render(request, 'classificationpipeline/timesheets.html', {
+        'timesheets': timesheets,
+    })
+
+
+@login_required
+@require_POST
+def timesheet_create(request):
+    first_month = parse_month(request.POST.get('start_month', ''))
+    last_month = parse_month(request.POST.get('end_month', ''))
+
+    if first_month is None or last_month is None or first_month > last_month:
+        messages.error(request, "Scegli un mese di inizio e un mese di fine validi.")
+        return redirect('classificationpipeline:timesheet_list')
+
+    last_day = monthrange(last_month.year, last_month.month)[1]
+    Timesheet.objects.create(
+        docente=request.user.docente,
+        start_date=first_month,
+        end_date=last_month.replace(day=last_day),
+    )
+    return redirect('classificationpipeline:timesheet_list')
+
+
+@login_required
+@require_POST
+def timesheet_close(request, timesheet_id):
+    timesheet = get_open_timesheet(request, timesheet_id)
+    timesheet.status = Timesheet.Status.CLOSED
+    timesheet.save(update_fields=['status'])
+    return redirect('classificationpipeline:timesheet_list')
+
+
+@login_required
+@require_POST
+def timesheet_delete(request, timesheet_id):
+    timesheet = get_timesheet(request, timesheet_id)
+    timesheet.delete()
+    return redirect('classificationpipeline:timesheet_list')
 
 
 class SelectCalendarsView(LoginRequiredMixin, TemplateView):
@@ -33,21 +139,34 @@ class SelectCalendarsView(LoginRequiredMixin, TemplateView):
     context_object_name = 'calendars'
 
     def get(self, request, *args, **kwargs):
+        self.timesheet = get_open_timesheet(request, kwargs['timesheet_id'])
+        self.work_range = get_work_range(request, self.timesheet)
+        if self.work_range is None:
+            return invalid_range(request)
+
+        query = urlencode({'next': request.get_full_path()})
+        login_url = f"{reverse('avvia_login_google')}?{query}"
         try:
             self.calendar_items = list_calendars(get_calendar_service(request.user))
         except GoogleCredentialsError:
-            return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
+            return redirect(login_url)
         except HttpError as exc:
             if exc.resp.status not in (401, 403):
                 raise
-            return redirect(f"{reverse('avvia_login_google')}?next={request.path}")
+            return redirect(login_url)
         return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        start, end = self.work_range
         context['calendars'] = {
             calendar['summary']: calendar['id'] for calendar in self.calendar_items
         }
+        context['timesheet'] = self.timesheet
+        context['start'] = start
+        context['end'] = end
+        context['import_url'] = page_url(
+            'classificationpipeline:event_compare', self.timesheet, start, end)
         return context
 
 
@@ -73,116 +192,111 @@ def parse_google_datetime(node, calendar_tz):
     return giorno.replace(tzinfo=ZoneInfo(calendar_tz))
 
 
-@login_required
-def check_events(request):
-
-    first_of_this_month = expiry_cutoff()
-    first_of_next_month = (first_of_this_month + timedelta(days=32)).replace(day=1)
-
-    events = Event.objects.filter(
-        calendar__docente=request.user.docente,
-        start_time__gte=first_of_this_month,
-        start_time__lt=first_of_next_month,
-    ).order_by('start_time')
-
-    return render(request, 'classificationpipeline/event_compare.html', {         
-    'mese': f"{MESI[first_of_this_month.month - 1]} {first_of_this_month.year}",
-    'eventi_classificati': events.filter(status=Event.Status.CLASSIFICATO),
-    'eventi_incerti': events.filter(status=Event.Status.INCERTO),
-    'categorie': Event.Category.choices,
+def show_events(request, timesheet, start, end):
+    events = events_in_range(timesheet, start, end)
+    return render(request, 'classificationpipeline/event_compare.html', {
+        'timesheet': timesheet,
+        'start': start,
+        'end': end,
+        'eventi_classificati': events.filter(status=Event.Status.CLASSIFICATO),
+        'eventi_incerti': events.filter(status=Event.Status.INCERTO),
+        'categorie': Event.Category.choices,
+        'classify_url': page_url(
+            'classificationpipeline:classifica_incerti', timesheet, start, end),
+        'classify_ai_url': page_url(
+            'classificationpipeline:classifica_incerti_ai', timesheet, start, end),
     })
 
 
 @login_required
-def event_compare(request):
+def event_compare(request, timesheet_id):
 
-    if request.method == 'POST':
-        calendar_ids = request.POST.getlist('calendars')
+    if request.method != 'POST':
+        timesheet = get_timesheet(request, timesheet_id)
+        work_range = get_work_range(request, timesheet)
+        if work_range is None:
+            return invalid_range(request)
+        start, end = work_range
+        return show_events(request, timesheet, start, end)
+
+    timesheet = get_open_timesheet(request, timesheet_id)
+    work_range = get_work_range(request, timesheet)
+    if work_range is None:
+        return invalid_range(request)
+    start, end = work_range
+    time_min, time_max = range_bounds(start, end)
+
+    calendars_url = page_url(
+        'classificationpipeline:eventi_calendars', timesheet, start, end)
+    calendar_ids = request.POST.getlist('calendars')
+
+    try:
+        service = get_calendar_service(request.user)
+    except GoogleCredentialsError:
+        return redirect(calendars_url)
+
+    hooks = request.user.docente.hook.config
+    for calendar_id in calendar_ids:
 
         try:
-            service = get_calendar_service(request.user)
+            data = list_events(service, calendar_id, time_min, time_max)
+        except HttpError:
+            # Calendario che Google rifiuta (rimosso, non piu' condiviso):
+            # si salta e si prosegue con gli altri.
+            continue
         except GoogleCredentialsError:
-            return redirect('classificationpipeline:eventi_calendars')
+            return redirect(calendars_url)
 
-        first_of_this_month = expiry_cutoff()
-        first_of_next_month = (first_of_this_month + timedelta(days=32)).replace(day=1)
-        hooks = request.user.docente.hook.config
-        for calendar_id in calendar_ids:
+        calendar_tz = data.get('timeZone', settings.TIME_ZONE)
+        calendar_title = data.get('summary', calendar_id)
+        events = data.get('items', [])
 
-            try:
-                data = list_events(
-                    service, calendar_id, first_of_this_month, first_of_next_month)
-            except HttpError:
-                # Calendario che Google rifiuta (rimosso, non piu' condiviso):
-                # si salta e si prosegue con gli altri.
-                continue
-            except GoogleCredentialsError:
-                return redirect('classificationpipeline:eventi_calendars')
+        for event in events:
 
-            calendar_tz = data.get('timeZone', settings.TIME_ZONE)
-            events = data.get('items', [])
-
-            calendar_obj, _ = Calendar.objects.get_or_create(
-                docente=request.user.docente,
-                calendar_id=calendar_id,
+            event_obj, created = Event.objects.update_or_create(
+                timesheet = timesheet,
+                calendar_id = calendar_id,
+                event_id = event['id'],
                 defaults={
-                    'title': data.get('summary', calendar_id),
-                    'description': data.get('description', ''),
+                    'calendar_title' : calendar_title,
+                    'title' : event.get('summary', ''),
+                    'description' : event.get('description', ''),
+                    'start_time' : parse_google_datetime(event['start'], calendar_tz),
+                    'end_time' : parse_google_datetime(event['end'], calendar_tz),
+                    'all_day' : 'date' in event['start'],
                 },
             )
 
-            for event in events:
-
-                event_obj, created = Event.objects.update_or_create(
-                    calendar = calendar_obj,
-                    event_id = event['id'],
-                    defaults={
-                        'title' : event.get('summary', ''),
-                        'description' : event.get('description', ''),
-                        'start_time' : parse_google_datetime(event['start'], calendar_tz),
-                        'end_time' : parse_google_datetime(event['end'], calendar_tz),
-                    },
+            if event_obj.status != Event.Status.INCERTO:
+                continue
+            title = event.get('summary', '').lower()
+            found_category = ''
+            for category, keywords in hooks.items():
+                if any(keyword in title for keyword in keywords):
+                    found_category = category
+                    break
+            if found_category:
+                event_obj.category = found_category
+                event_obj.status = Event.Status.CLASSIFICATO
+                event_obj.save(update_fields=['category', 'status'])
+                print(
+                    f"[classificato] {event_obj.title} | "
+                    f"{event_obj.start_time:%d/%m %H:%M}-{event_obj.end_time:%H:%M} | "
+                    f"{found_category}"
                 )
 
-                if event_obj.status != Event.Status.INCERTO:
-                    continue
-                title = event.get('summary', '').lower()
-                found_category = ''
-                for category, keywords in hooks.items():
-                    if any(keyword in title for keyword in keywords):
-                        found_category = category
-                        break
-                if found_category:
-                    event_obj.category = found_category
-                    event_obj.status = Event.Status.CLASSIFICATO
-                    event_obj.save(update_fields=['category', 'status'])
-
-        eventi = (
-            Event.objects
-            .filter(
-                calendar__docente=request.user.docente,
-                calendar__calendar_id__in=calendar_ids, 
-                start_time__gte=first_of_this_month,
-                start_time__lt=first_of_next_month,
-            )
-            .select_related('calendar')
-            .order_by('start_time')
-        )
-
-        return render(request, 'classificationpipeline/event_compare.html', {
-            'calendar_ids': calendar_ids,
-            'mese': f"{MESI[first_of_this_month.month - 1]} {first_of_this_month.year}",
-            'eventi_classificati': eventi.filter(status=Event.Status.CLASSIFICATO),
-            'eventi_incerti': eventi.filter(status=Event.Status.INCERTO),
-            'categorie': Event.Category.choices,
-        })
-    
-    else:
-        return check_events(request)
+    return redirect(page_url(
+        'classificationpipeline:event_compare', timesheet, start, end))
 
 
 @login_required
-def classifica_incerti(request):
+def classifica_incerti(request, timesheet_id):
+
+    timesheet = get_open_timesheet(request, timesheet_id)
+    work_range = get_work_range(request, timesheet)
+    if work_range is None:
+        return invalid_range(request)
+    start, end = work_range
 
     if request.method == 'POST':
 
@@ -201,7 +315,7 @@ def classifica_incerti(request):
 
         events = list(Event.objects.filter(
             pk__in = choices,
-            calendar__docente = request.user.docente,
+            timesheet = timesheet,
             status = Event.Status.INCERTO,
         ))
 
@@ -212,29 +326,32 @@ def classifica_incerti(request):
         with transaction.atomic():
             Event.objects.bulk_update(events, ['category', 'status'])
 
-    return redirect('classificationpipeline:event_compare')
+    return redirect(page_url(
+        'classificationpipeline:event_compare', timesheet, start, end))
 
 
 
 @login_required
 @require_POST
-def classifica_incerti_ai(request):
+def classifica_incerti_ai(request, timesheet_id):
 
-    first_of_this_month = expiry_cutoff()
-    first_of_next_month = (first_of_this_month + timedelta(days=32)).replace(day=1)
+    timesheet = get_open_timesheet(request, timesheet_id)
+    work_range = get_work_range(request, timesheet)
+    if work_range is None:
+        return invalid_range(request)
+    start, end = work_range
+    events_url = page_url(
+        'classificationpipeline:event_compare', timesheet, start, end)
 
-    events = list(Event.objects.filter(
-        calendar__docente=request.user.docente,
+    events = list(events_in_range(timesheet, start, end).filter(
         status=Event.Status.INCERTO,
-        start_time__gte=first_of_this_month,
-        start_time__lt=first_of_next_month,
     ))
 
     try:
-        choices = classify_events(events)
+        choices = ai_classificator(events)
     except LLMClassificationError:
         messages.error(request, "Classificazione automatica non disponibile, riprova piu' tardi.")
-        return redirect('classificationpipeline:event_compare')
+        return redirect(events_url)
 
     classified = []
     for event in events:
@@ -245,4 +362,4 @@ def classifica_incerti_ai(request):
 
     Event.objects.bulk_update(classified, ['category', 'status'])
 
-    return redirect('classificationpipeline:event_compare')
+    return redirect(events_url)

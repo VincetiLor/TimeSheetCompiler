@@ -1,50 +1,38 @@
-from datetime import timedelta
 from django.db import models
-from django.db.models import Q
-from django.utils import timezone
-
-# Create your models here.
+from django.db.models import F, Q
 
 
-def expiry_cutoff(at=None):
-    """Primo istante ancora "in tempo": tutto cio' che inizia prima e' scaduto.
+class Timesheet(models.Model):
 
-    La regola di consegna e' che il timesheet di un mese va consegnato entro il
-    5-6 del mese successivo; il giorno 8 e' il margine oltre il quale un evento
-    non compilato si considera fuori tempo. Un evento del mese M scade quindi
-    al giorno 8 del mese M+1.
+    class Status(models.TextChoices):
+        OPEN = 'open', 'Open'
+        CLOSED = 'closed', 'Closed'
 
-    `at` serve ai test e alle simulazioni: senza, si usa l'ora corrente.
-    """
-    now = timezone.localtime(at) if at is not None else timezone.localtime()
-    first_of_this_month = now.replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0)
-
-    if now.day >= 8:        
-        return first_of_this_month
-
-    # Non siamo ancora all'8: il mese scorso ha ancora tempo per essere compilato 
-    return (first_of_this_month - timedelta(days=1)).replace(day=1)
-
-
-class Calendar(models.Model):
-
-    docente = models.ForeignKey('authentication.Docente', on_delete=models.CASCADE, related_name='calendars')
-    calendar_id = models.CharField(max_length=255)
-    title = models.CharField(max_length=255)
-    description = models.TextField(blank=True, null=True)
-    event = models.JSONField(blank=True, null=True)
+    docente = models.ForeignKey('authentication.Docente', on_delete=models.CASCADE, related_name='timesheets')
+    start_date = models.DateField()
+    end_date = models.DateField()
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.OPEN,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        ordering = ['-start_date']
         constraints = [
-            models.UniqueConstraint(
-                fields=['docente', 'calendar_id'],
-                name='unique_calendar_to_professor',
+            models.CheckConstraint(
+                condition=Q(end_date__gte=F('start_date')),
+                name='timesheet_end_not_before_start',
             ),
         ]
 
+    @property
+    def is_open(self):
+        return self.status == self.Status.OPEN
+
     def __str__(self):
-        return f"{self.title} ({self.calendar_id})"
+        return f"{self.start_date} - {self.end_date} [{self.status}]"
 
 
 class EventQuerySet(models.QuerySet):
@@ -56,11 +44,6 @@ class EventQuerySet(models.QuerySet):
         `idx_event_active`.
         """
         return self.filter(status__in=Event.ACTIVE_STATUSES)
-
-    def expired(self, at=None):
-        #Eventi attivi il cui termine di consegna e' gia' passato.
-
-        return self.active().filter(start_time__lt=expiry_cutoff(at))
 
 
 class Event(models.Model):
@@ -77,23 +60,25 @@ class Event(models.Model):
         incerto      -> non ancora classificato, o scartato temporaneamente
         classificato -> ha una classificazione (hook, LLM sopra soglia, manuale)
         compilato    -> la classificazione e' finita nel timesheet esterno
-        passato      -> fuori dalla finestra di validita' senza essere compilato
         """
 
         INCERTO = 'incerto', 'Incerto'
         CLASSIFICATO = 'classificato', 'Classificato'
         COMPILATO = 'compilato', 'Compilato'
-        PASSATO = 'passato', 'Passato'
 
-    # Sottoinsieme "attivo": gli stati su cui lavora la pipeline. 
+    # Sottoinsieme "attivo": gli stati su cui lavora la pipeline.
     ACTIVE_STATUSES = (Status.INCERTO, Status.CLASSIFICATO)
 
-    calendar = models.ForeignKey(Calendar, on_delete=models.CASCADE, related_name='events')
+    timesheet = models.ForeignKey(Timesheet, on_delete=models.CASCADE, related_name='events')
+    # Google calendar id: an event id is unique only inside its calendar
+    calendar_id = models.CharField(max_length=255)
+    calendar_title = models.CharField(max_length=255, blank=True)
     event_id = models.CharField(max_length=255)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
+    all_day = models.BooleanField(default=False)
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -103,7 +88,7 @@ class Event(models.Model):
         max_length=32,
         choices=Category.choices,
         blank=True,
-        default='',      
+        default='',
     )
 
     objects = EventQuerySet.as_manager()
@@ -111,16 +96,16 @@ class Event(models.Model):
     class Meta:
         indexes = [
                     models.Index(
-                        fields=['calendar', 'start_time'],
+                        fields=['timesheet', 'start_time'],
                         condition=Q(status__in=['incerto', 'classificato']),
                         name='idx_event_active',
                     ),
                 ]
-        
+
         constraints = [
             models.UniqueConstraint(
-                fields=['calendar', 'event_id'],
-                name='unique_event_to_calendar',
+                fields=['timesheet', 'calendar_id', 'event_id'],
+                name='unique_event_to_timesheet',
             ),
             models.CheckConstraint(
                 condition=(

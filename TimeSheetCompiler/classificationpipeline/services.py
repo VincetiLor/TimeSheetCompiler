@@ -51,7 +51,7 @@ RESPONSE_FORMAT = {
 }
 
 
-def classify_events(events):
+def ai_classificator(events):
     if not events:
         return {}
 

@@ -1,15 +1,15 @@
 {% extends 'index.html' %}
 
-{% block titolo %}Eventi di {{ mese }}{% endblock %}
+{% block titolo %}Eventi{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl">
-    <a href="{% url 'classificationpipeline:eventi_calendars' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
+    <a href="{% url 'classificationpipeline:timesheet_list' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
         <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4"><path d="M16 10H4M9 5l-5 5 5 5"/></svg>
-        Torna ai calendari
+        Torna ai timesheet
     </a>
 
-    <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Eventi di {{ mese }}</h1>
+    <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Eventi dal {{ start|date:"d/m/Y" }} al {{ end|date:"d/m/Y" }}</h1>
     <p class="mt-4 max-w-xl text-lg leading-relaxed">
         Gli eventi dei calendari che hai scelto, confrontati con le tue regole.
         Quelli classificati andranno nel timesheet; quelli incerti non contengono
@@ -36,7 +36,7 @@
                 {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_classificati categoria=True %}
             {% else %}
                 <p class="px-5 py-8 text-center">
-                    Nessun evento classificato: nessuna parola chiave compare nei titoli di questo mese.
+                    Nessun evento classificato: nessuna parola chiave compare nei titoli di questo periodo.
                 </p>
             {% endif %}
         </div>
@@ -47,7 +47,11 @@
             Incerti <span class="text-grigio">({{ eventi_incerti|length }})</span>
         </h2>
 
-        {% if eventi_incerti %}
+        {% if eventi_incerti and not timesheet.is_open %}
+        <div class="mt-4 rounded-lg border border-dashed border-linea">
+            {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_incerti categoria=False %}
+        </div>
+        {% elif eventi_incerti %}
         <p class="mt-2 max-w-xl">
             Per ora restano fuori dal timesheet. Per un evento isolato scegli la
             categoria qui sotto e salva; se un evento si ripete, conviene una
@@ -60,7 +64,7 @@
         incerto, quelle valorizzate lo classificano. La view risponde con un
         redirect al GET di questa pagina (Post/Redirect/Get).
         {% endcomment %}
-        <form method="post" action="{% url 'classificationpipeline:classifica_incerti' %}">
+        <form method="post" action="{{ classify_url }}">
             {% csrf_token %}
             <div class="mt-4 rounded-lg border border-dashed border-linea">
                 {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_incerti categoria=False scelta=True %}
@@ -74,12 +78,12 @@
                 </button>
             </div>
         </form>
-        <form id="classifica-ai" method="post" action="{% url 'classificationpipeline:classifica_incerti_ai' %}">
+        <form id="classifica-ai" method="post" action="{{ classify_ai_url }}">
             {% csrf_token %}
         </form>
         {% else %}
         <div class="mt-4 rounded-lg border border-dashed border-linea">
-            <p class="px-5 py-8 text-center">Nessun evento incerto: ogni evento del mese ha una categoria.</p>
+            <p class="px-5 py-8 text-center">Nessun evento incerto: ogni evento del periodo ha una categoria.</p>
         </div>
         {% endif %}
     </section>
@@ -87,7 +91,7 @@
     {% comment %}
     La compilazione via Selenium non esiste ancora: il bottone c'e' gia' per
     fissare il punto del flusso, ma e' disattivato. Quando esistera' diventera'
-    un form POST verso la view di compilazione, con gli stessi calendar_ids.
+    un form POST verso la view di compilazione, con lo stesso intervallo.
     {% endcomment %}
     <div class="mt-10 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t border-linea pt-6">
         <p id="nota-compila" class="text-sm">La compilazione automatica non è ancora disponibile.</p>

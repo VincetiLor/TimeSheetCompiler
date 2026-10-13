@@ -1,0 +1,109 @@
+{% extends 'index.html' %}
+
+{% block titolo %}Timesheet{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl">
+    <a href="{% url 'index' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
+        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4"><path d="M16 10H4M9 5l-5 5 5 5"/></svg>
+        Torna alla home
+    </a>
+
+    <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Timesheet</h1>
+    <p class="mt-4 max-w-xl text-lg leading-relaxed">
+        Apri un timesheet e scegli le date su cui vuoi lavorare, oppure creane
+        uno nuovo.
+    </p>
+
+    {% for message in messages %}
+    <p role="alert" class="mt-8 rounded-md border border-linea bg-superficie px-5 py-3 font-semibold text-inchiostro">{{ message }}</p>
+    {% endfor %}
+
+    {% comment %}
+    Ogni timesheet e' un <details>: aprendolo compare la scelta delle date,
+    senza cambiare pagina e senza JavaScript. I due bottoni del form mandano
+    le stesse date a due pagine diverse (formaction).
+    {% endcomment %}
+    <div class="mt-10 rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
+        {% if timesheets %}
+        <div class="divide-y divide-linea">
+            {% for timesheet in timesheets %}
+            <div class="flex items-start gap-2 px-5 py-4">
+                <details class="min-w-0 flex-1">
+                    <summary class="cursor-pointer py-2 font-serif text-xl text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                        {{ timesheet.start_date|date:"m/Y" }} – {{ timesheet.end_date|date:"m/Y" }}
+                        {% if not timesheet.is_open %}
+                        <span class="ml-2 inline-block rounded-full bg-bosco-chiaro px-3 py-1 font-sans text-sm font-medium text-bosco-scuro">Completato</span>
+                        {% endif %}
+                    </summary>
+
+                    <form method="get" class="mt-4">
+                        <div class="flex flex-wrap gap-4">
+                            <label class="flex-1 text-sm font-semibold text-inchiostro">
+                                Dal
+                                <input type="date" name="start" required value="{{ timesheet.start_date|date:'Y-m-d' }}" min="{{ timesheet.start_date|date:'Y-m-d' }}" max="{{ timesheet.end_date|date:'Y-m-d' }}" class="campo mt-1 font-normal">
+                            </label>
+                            <label class="flex-1 text-sm font-semibold text-inchiostro">
+                                Al
+                                <input type="date" name="end" required value="{{ timesheet.end_date|date:'Y-m-d' }}" min="{{ timesheet.start_date|date:'Y-m-d' }}" max="{{ timesheet.end_date|date:'Y-m-d' }}" class="campo mt-1 font-normal">
+                            </label>
+                        </div>
+                        <div class="mt-4 flex flex-wrap gap-3">
+                            {% if timesheet.is_open %}
+                            <button type="submit" formaction="{% url 'classificationpipeline:eventi_calendars' timesheet.pk %}" class="h-11 rounded-md bg-bosco px-6 font-semibold text-carta transition-colors hover:bg-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                                Scegli i calendari
+                            </button>
+                            {% endif %}
+                            <button type="submit" formaction="{% url 'classificationpipeline:event_compare' timesheet.pk %}" class="h-11 rounded-md border border-bosco bg-carta px-6 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                                Vedi gli eventi
+                            </button>
+                        </div>
+                    </form>
+                </details>
+
+                {% if timesheet.is_open %}
+                <form method="post" action="{% url 'classificationpipeline:timesheet_close' timesheet.pk %}" onsubmit="return confirm('Segnare il timesheet come completato? Non si potrà più modificare.')">
+                    {% csrf_token %}
+                    <button type="submit" class="h-11 rounded-md border border-bosco bg-carta px-5 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                        Completato
+                    </button>
+                </form>
+                {% endif %}
+
+                <form method="post" action="{% url 'classificationpipeline:timesheet_delete' timesheet.pk %}" onsubmit="return confirm('Eliminare il timesheet e tutti i suoi eventi?{% if timesheet.compiled_count %} Contiene {{ timesheet.compiled_count }} eventi già compilati: se lo elimini si perde la traccia di cosa è stato inserito.{% endif %}')">
+                    {% csrf_token %}
+                    <button type="submit" aria-label="Elimina questo timesheet" title="Elimina questo timesheet" class="flex size-11 shrink-0 items-center justify-center rounded-md text-grigio transition-colors hover:bg-linea/70 hover:text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" class="size-4"><path d="M5 5l10 10M15 5L5 15"/></svg>
+                    </button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="px-5 py-8 text-center">Non hai ancora nessun timesheet. Creane uno qui sotto.</p>
+        {% endif %}
+    </div>
+
+    <section aria-labelledby="nuovo" class="mt-12">
+        <h2 id="nuovo" class="font-serif text-2xl text-inchiostro">Nuovo timesheet</h2>
+        <p class="mt-2 max-w-xl">Scegli il primo e l'ultimo mese che il timesheet copre.</p>
+
+        <form method="post" action="{% url 'classificationpipeline:timesheet_create' %}" class="mt-4 rounded-lg border border-linea bg-superficie px-5 py-4">
+            {% csrf_token %}
+            <div class="flex flex-wrap items-end gap-4">
+                <label class="flex-1 text-sm font-semibold text-inchiostro">
+                    Dal mese
+                    <input type="month" name="start_month" required placeholder="2026-01" pattern="\d{4}-\d{2}" class="campo mt-1 font-normal">
+                </label>
+                <label class="flex-1 text-sm font-semibold text-inchiostro">
+                    Al mese
+                    <input type="month" name="end_month" required placeholder="2026-06" pattern="\d{4}-\d{2}" class="campo mt-1 font-normal">
+                </label>
+                <button type="submit" class="h-11 rounded-md bg-bosco px-7 font-semibold text-carta transition-colors hover:bg-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                    Crea
+                </button>
+            </div>
+        </form>
+    </section>
+</div>
+{% endblock %}

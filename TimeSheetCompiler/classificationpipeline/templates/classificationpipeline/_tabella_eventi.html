@@ -24,7 +24,7 @@ Gli eventi "giornata intera" arrivano da Google come mezzanotte-mezzanotte
             {% for evento in eventi %}
             <tr>
                 <td class="px-5 py-3 text-inchiostro">{{ evento.title|default:"(senza titolo)" }}</td>
-                <td class="px-5 py-3">{{ evento.calendar.title }}</td>
+                <td class="px-5 py-3">{{ evento.calendar_title }}</td>
                 <td class="px-5 py-3 whitespace-nowrap tabular-nums">{{ evento.start_time|date:"d/m/Y" }}</td>
                 <td class="px-5 py-3 whitespace-nowrap tabular-nums">
                     {% if evento.start_time|date:"H:i" == "00:00" and evento.end_time|date:"H:i" == "00:00" %}
