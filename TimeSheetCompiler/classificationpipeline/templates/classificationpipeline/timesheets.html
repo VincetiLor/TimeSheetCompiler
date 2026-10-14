@@ -57,6 +57,11 @@
                             <button type="submit" formaction="{% url 'classificationpipeline:event_compare' timesheet.pk %}" class="h-11 rounded-md border border-bosco bg-carta px-6 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
                                 Vedi gli eventi
                             </button>
+                            {% if timesheet.is_open %}
+                            <a href="{% url 'classificationpipeline:timesheet_settings' timesheet.pk %}" class="inline-flex h-11 items-center rounded-md px-4 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                                Impostazioni
+                            </a>
+                            {% endif %}
                         </div>
                     </form>
                 </details>
@@ -88,9 +93,9 @@
         <h2 id="nuovo" class="font-serif text-2xl text-inchiostro">Nuovo timesheet</h2>
         <p class="mt-2 max-w-xl">Scegli il primo e l'ultimo mese che il timesheet copre.</p>
 
-        <form method="post" action="{% url 'classificationpipeline:timesheet_create' %}" class="mt-4 rounded-lg border border-linea bg-superficie px-5 py-4">
+        <form method="post" action="{% url 'classificationpipeline:timesheet_create' %}" class="mt-4">
             {% csrf_token %}
-            <div class="flex flex-wrap items-end gap-4">
+            <div class="flex flex-wrap gap-4 rounded-lg border border-linea bg-superficie px-5 py-4">
                 <label class="flex-1 text-sm font-semibold text-inchiostro">
                     Dal mese
                     <input type="month" name="start_month" required placeholder="2026-01" pattern="\d{4}-\d{2}" class="campo mt-1 font-normal">
@@ -99,8 +104,10 @@
                     Al mese
                     <input type="month" name="end_month" required placeholder="2026-06" pattern="\d{4}-\d{2}" class="campo mt-1 font-normal">
                 </label>
-                <button type="submit" class="h-11 rounded-md bg-bosco px-7 font-semibold text-carta transition-colors hover:bg-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
-                    Crea
+            </div>
+            <div class="mt-4 flex">
+                <button type="submit" class="ml-auto h-11 rounded-md bg-bosco px-7 font-semibold text-carta transition-colors hover:bg-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                    Vai alla configurazione
                 </button>
             </div>
         </form>

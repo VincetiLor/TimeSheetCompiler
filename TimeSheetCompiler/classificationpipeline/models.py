@@ -16,6 +16,9 @@ class Timesheet(models.Model):
         choices=Status.choices,
         default=Status.OPEN,
     )
+    all_day_hours = models.PositiveSmallIntegerField(default=8)
+    # Empty means no cap on the total
+    total_hours_cap = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -49,10 +52,21 @@ class EventQuerySet(models.QuerySet):
 class Event(models.Model):
 
 
+    # The label must match the text of the row in the Esse3 diary
     class Category(models.TextChoices):
-        RICERCA_FINANZIATA = 'ricerca_finanziata', 'Ricerca Finanziata'
-        DIDATTICA = 'didattica', 'Didattica'
-        RICERCA_BASE = 'ricerca_base', 'Ricerca Base'
+        ASSISTENZA_LAUREANDI = 'assistenza_laureandi', 'assistenza laureandi'
+        ATENEI_CONVENZIONATI = 'atenei_convenzionati', 'attività did. atenei convenzionati'
+        DIDATTICA_INTEGRATIVA = 'didattica_integrativa', 'attività didattiche integrative'
+        DOTTORATI = 'dottorati', 'attività dottorati di ricerca'
+        MASTER = 'master', 'attività master'
+        PNRR = 'pnrr', 'Attività PNRR (solo RTD-A)'
+        SCUOLE_SPECIALIZZAZIONE = 'scuole_specializzazione', 'attività scuole di specializzazione'
+        COMPITI_ORGANIZZATIVI = 'compiti_organizzativi', 'compiti organizzativi interni'
+        ESAMI_LAUREA = 'esami_laurea', 'esami di laurea'
+        ESAMI_PROFITTO = 'esami_profitto', 'esami di profitto'
+        ORIENTAMENTO_TUTORATO = 'orientamento_tutorato', 'orient. e tutor. piani di studio, stages'
+        PREPARAZIONE_LEZIONI = 'preparazione_lezioni', 'preparazione lezioni'
+        RICEVIMENTO_STUDENTI = 'ricevimento_studenti', 'ricevimento studenti'
 
 
     class Status(models.TextChoices):
@@ -117,3 +131,21 @@ class Event(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.event_id}) [{self.status}]"
+
+
+# A category without a cap row has no cap
+class TimesheetHourCap(models.Model):
+    timesheet = models.ForeignKey(Timesheet, on_delete=models.CASCADE, related_name='hour_caps')
+    category = models.CharField(max_length=32, choices=Event.Category.choices)
+    max_hours = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['timesheet', 'category'],
+                name='unique_timesheet_cap_per_category',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.category}: {self.max_hours} h"

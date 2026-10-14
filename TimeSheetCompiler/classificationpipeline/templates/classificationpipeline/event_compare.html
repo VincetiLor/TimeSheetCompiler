@@ -3,17 +3,34 @@
 {% block titolo %}Eventi{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl">
+{% comment %}La riga in alto esce dal max-w-4xl: i tre puntini stanno sul bordo destro della pagina.{% endcomment %}
+<div class="flex items-center justify-between gap-4">
     <a href="{% url 'classificationpipeline:timesheet_list' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
         <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4"><path d="M16 10H4M9 5l-5 5 5 5"/></svg>
         Torna ai timesheet
     </a>
 
+    {% if timesheet.is_open %}
+    {% comment %}Menu a tre puntini: un <details>, come le card dei timesheet, senza JavaScript.{% endcomment %}
+    <details class="relative">
+        <summary aria-label="Altre azioni" title="Altre azioni" class="flex size-11 cursor-pointer list-none items-center justify-center rounded-md text-grigio transition-colors hover:bg-linea/70 hover:text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco [&::-webkit-details-marker]:hidden">
+            <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" class="size-5"><circle cx="4" cy="10" r="1.6"/><circle cx="10" cy="10" r="1.6"/><circle cx="16" cy="10" r="1.6"/></svg>
+        </summary>
+        <div class="absolute right-0 z-10 mt-1 w-56 rounded-md border border-linea bg-carta py-1 shadow-[0_10px_30px_-12px_rgb(23_58_41/0.35)]">
+            <a href="{% url 'classificationpipeline:timesheet_settings' timesheet.pk %}?{{ settings_query }}" class="block px-4 py-2 font-semibold text-inchiostro hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-bosco">
+                Vai alle impostazioni
+            </a>
+        </div>
+    </details>
+    {% endif %}
+</div>
+<div class="max-w-4xl">
     <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Eventi dal {{ start|date:"d/m/Y" }} al {{ end|date:"d/m/Y" }}</h1>
     <p class="mt-4 max-w-xl text-lg leading-relaxed">
         Gli eventi dei calendari che hai scelto, confrontati con le tue regole.
         Quelli classificati andranno nel timesheet; quelli incerti non contengono
         nessuna delle tue parole chiave.
+        {% if timesheet.is_open %}Con la × togli un evento: se importi di nuovo quelle date, ritorna.{% endif %}
     </p>
 
     {% comment %}
@@ -26,6 +43,12 @@
     <p role="alert" class="mt-8 rounded-md border border-linea bg-superficie px-5 py-3 font-semibold text-inchiostro">{{ message }}</p>
     {% endfor %}
 
+    {% if timesheet.is_open %}
+    <form id="togli-evento" method="post">
+        {% csrf_token %}
+    </form>
+    {% endif %}
+
     <section aria-labelledby="classificati" class="mt-12">
         <h2 id="classificati" class="font-serif text-2xl text-inchiostro">
             Classificati <span class="text-grigio">({{ eventi_classificati|length }})</span>
@@ -33,7 +56,7 @@
 
         <div class="mt-4 rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
             {% if eventi_classificati %}
-                {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_classificati categoria=True %}
+                {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_classificati categoria=True togli=timesheet.is_open %}
             {% else %}
                 <p class="px-5 py-8 text-center">
                     Nessun evento classificato: nessuna parola chiave compare nei titoli di questo periodo.
@@ -67,7 +90,7 @@
         <form method="post" action="{{ classify_url }}">
             {% csrf_token %}
             <div class="mt-4 rounded-lg border border-dashed border-linea">
-                {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_incerti categoria=False scelta=True %}
+                {% include "classificationpipeline/_tabella_eventi.html" with eventi=eventi_incerti categoria=False scelta=True togli=True %}
             </div>
             <div class="mt-4 flex flex-wrap gap-3">
                 <button type="submit" class="h-11 rounded-md border border-bosco bg-carta px-6 font-semibold text-bosco transition-colors hover:bg-bosco-chiaro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
@@ -89,15 +112,72 @@
     </section>
 
     {% comment %}
-    La compilazione via Selenium non esiste ancora: il bottone c'e' gia' per
-    fissare il punto del flusso, ma e' disattivato. Quando esistera' diventera'
-    un form POST verso la view di compilazione, con lo stesso intervallo.
+    Ore gia' compilate in tutto il timesheet piu' i classificati di queste
+    date, per ogni categoria con un tetto (vedi hours.check_caps). Una riga
+    oltre il tetto e' in rosso e blocca la compilazione.
     {% endcomment %}
-    <div class="mt-10 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t border-linea pt-6">
-        <p id="nota-compila" class="text-sm">La compilazione automatica non è ancora disponibile.</p>
-        <button type="button" disabled aria-describedby="nota-compila" class="h-11 rounded-md bg-bosco px-7 font-semibold text-carta disabled:cursor-not-allowed disabled:opacity-40">
+    {% if caps %}
+    <section aria-labelledby="tetti" class="mt-12">
+        <h2 id="tetti" class="font-serif text-2xl text-inchiostro">Tetti di ore</h2>
+        <div class="mt-4 rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
+            <div class="overflow-x-auto">
+                <table class="w-full min-w-[36rem] text-left">
+                    <thead class="border-b border-linea text-sm text-inchiostro">
+                        <tr>
+                            <th scope="col" class="px-5 py-3 font-semibold">Categoria</th>
+                            <th scope="col" class="px-5 py-3 text-right font-semibold">Già compilate</th>
+                            <th scope="col" class="px-5 py-3 text-right font-semibold">Da compilare</th>
+                            <th scope="col" class="px-5 py-3 text-right font-semibold">Tetto</th>
+                            <th scope="col" class="px-5 py-3 font-semibold"><span class="sr-only">Stato</span></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-linea">
+                        {% for cap in caps %}
+                        <tr class="{% if cap.excess > 0 %}bg-red-50{% endif %}">
+                            <td class="px-5 py-3 text-inchiostro">{{ cap.label }}</td>
+                            <td class="px-5 py-3 text-right tabular-nums">{{ cap.compiled|floatformat:"-2" }}</td>
+                            <td class="px-5 py-3 text-right tabular-nums">{{ cap.to_compile|floatformat:"-2" }}</td>
+                            <td class="px-5 py-3 text-right tabular-nums">{{ cap.max_hours }}</td>
+                            <td class="px-5 py-3 whitespace-nowrap">
+                                {% if cap.excess > 0 %}
+                                <span class="font-semibold text-red-800">Oltre di {{ cap.excess|floatformat:"-2" }} h</span>
+                                {% else %}
+                                <span class="text-bosco-scuro">Entro il tetto</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% if over_caps and timesheet.is_open %}
+        <p role="alert" class="mt-4 max-w-xl font-semibold text-red-800">
+            Alcuni tetti sono superati: togli degli eventi con la × oppure alza i
+            tetti nelle
+            <a href="{% url 'classificationpipeline:timesheet_settings' timesheet.pk %}?{{ settings_query }}" class="text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 hover:decoration-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">impostazioni</a>.
+        </p>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    {% comment %}
+    Compila i classificati di queste date (compilation.compile_events). Il
+    bottone e' spento se non c'e' niente da compilare o se un tetto e'
+    superato; la view ripete comunque il controllo dei tetti.
+    {% endcomment %}
+    {% if timesheet.is_open %}
+    <form method="post" action="{{ compile_url }}" class="mt-10 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t border-linea pt-6">
+        {% csrf_token %}
+        {% if over_caps %}
+        <p id="nota-compila" class="text-sm">Non si può compilare finché un tetto è superato.</p>
+        {% elif not eventi_classificati %}
+        <p id="nota-compila" class="text-sm">Nessun evento classificato da compilare.</p>
+        {% endif %}
+        <button type="submit" {% if over_caps or not eventi_classificati %}disabled aria-describedby="nota-compila"{% endif %} onclick="return confirm('Compilare i {{ eventi_classificati|length }} eventi classificati? Non si potranno più togliere.')" class="h-11 rounded-md bg-bosco px-7 font-semibold text-carta transition-colors hover:bg-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-bosco">
             Compila il timesheet
         </button>
-    </div>
+    </form>
+    {% endif %}
 </div>
 {% endblock %}

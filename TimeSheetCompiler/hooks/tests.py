@@ -87,14 +87,14 @@ class HookSettingsTests(TestCase):
         added on demand by the page's "Aggiungi regola" button instead.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['lezione']})
+            config={'preparazione_lezioni': ['lezione']})
         self.client.force_login(self.user)
 
         response = self.client.get('/hooks/')
 
         self.assertEqual(len(response.context['form'].forms), 1)
         self.assertEqual(response.context['form'].forms[0].initial,
-                         {'category': 'didattica', 'keyword': 'lezione'})
+                         {'category': 'preparazione_lezioni', 'keyword': 'lezione'})
 
     def test_first_visit_shows_no_rows(self):
         self.client.force_login(self.user)
@@ -109,22 +109,22 @@ class HookSettingsTests(TestCase):
         and submit, with no new row to fill or delete.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['lezione']})
+            config={'preparazione_lezioni': ['lezione']})
         self.client.force_login(self.user)
 
         response = self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'esame'},
+            {'category': 'preparazione_lezioni', 'keyword': 'esame'},
         ], initial=1))
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self._config(), {'didattica': ['esame']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['esame']})
 
     def test_saved_rules_come_back_as_one_row_each(self):
         """The stored shape is one category to many keywords; the form shows
         one keyword per row, so a category with two keywords is two rows.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['lezione', 'esame']})
+            config={'preparazione_lezioni': ['lezione', 'esame']})
         self.client.force_login(self.user)
 
         response = self.client.get('/hooks/')
@@ -132,24 +132,24 @@ class HookSettingsTests(TestCase):
         rows = [form.initial for form in response.context['form'].forms
                 if form.initial]
         self.assertEqual(rows, [
-            {'category': 'didattica', 'keyword': 'lezione'},
-            {'category': 'didattica', 'keyword': 'esame'},
+            {'category': 'preparazione_lezioni', 'keyword': 'lezione'},
+            {'category': 'preparazione_lezioni', 'keyword': 'esame'},
         ])
 
     def test_rows_are_saved_grouped_by_category(self):
         self.client.force_login(self.user)
 
         response = self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'lezione'},
-            {'category': 'ricerca_base', 'keyword': 'seminario'},
-            {'category': 'didattica', 'keyword': 'esame'},
+            {'category': 'preparazione_lezioni', 'keyword': 'lezione'},
+            {'category': 'ricevimento_studenti', 'keyword': 'seminario'},
+            {'category': 'preparazione_lezioni', 'keyword': 'esame'},
         ]))
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, '/hooks/')
         self.assertEqual(self._config(), {
-            'didattica': ['lezione', 'esame'],
-            'ricerca_base': ['seminario'],
+            'preparazione_lezioni': ['lezione', 'esame'],
+            'ricevimento_studenti': ['seminario'],
         })
 
     def test_a_keyword_is_normalised_once_at_save_time(self):
@@ -160,17 +160,17 @@ class HookSettingsTests(TestCase):
         self.client.force_login(self.user)
 
         self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': '  Lezione Magistrale  '},
+            {'category': 'preparazione_lezioni', 'keyword': '  Lezione Magistrale  '},
         ]))
 
-        self.assertEqual(self._config(), {'didattica': ['lezione magistrale']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['lezione magistrale']})
 
     def test_submitting_no_rows_clears_the_configuration(self):
         """Deleting the last rule has to be possible, and an empty formset is
         how it arrives.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['lezione']})
+            config={'preparazione_lezioni': ['lezione']})
         self.client.force_login(self.user)
 
         self.client.post('/hooks/', formset_post([]))
@@ -183,15 +183,15 @@ class HookSettingsTests(TestCase):
         not in the POST, and the rebuilt config no longer has it.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['lezione', 'esame']})
+            config={'preparazione_lezioni': ['lezione', 'esame']})
         self.client.force_login(self.user)
 
         response = self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'lezione'},
+            {'category': 'preparazione_lezioni', 'keyword': 'lezione'},
         ], initial=1))
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self._config(), {'didattica': ['lezione']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['lezione']})
 
     def test_a_saved_row_removed_from_the_middle_is_deleted(self):
         """The row's × removes it from the page and renumbers the rows below,
@@ -199,16 +199,16 @@ class HookSettingsTests(TestCase):
         INITIAL_FORMS lowered by one.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['lezione', 'esame', 'tutorato']})
+            config={'preparazione_lezioni': ['lezione', 'esame', 'tutorato']})
         self.client.force_login(self.user)
 
         response = self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'lezione'},
-            {'category': 'didattica', 'keyword': 'tutorato'},
+            {'category': 'preparazione_lezioni', 'keyword': 'lezione'},
+            {'category': 'preparazione_lezioni', 'keyword': 'tutorato'},
         ], initial=2))
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self._config(), {'didattica': ['lezione', 'tutorato']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['lezione', 'tutorato']})
 
     def test_a_delete_flag_is_ignored(self):
         """There is no DELETE checkbox any more: a stale page or a hand-made
@@ -217,10 +217,10 @@ class HookSettingsTests(TestCase):
         self.client.force_login(self.user)
 
         self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'esame', 'DELETE': 'on'},
+            {'category': 'preparazione_lezioni', 'keyword': 'esame', 'DELETE': 'on'},
         ]))
 
-        self.assertEqual(self._config(), {'didattica': ['esame']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['esame']})
 
     def test_the_same_keyword_twice_in_one_category_is_stored_once(self):
         """Two identical rows are a repetition, not two rules: they collapse
@@ -229,11 +229,11 @@ class HookSettingsTests(TestCase):
         self.client.force_login(self.user)
 
         self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'lezione'},
-            {'category': 'didattica', 'keyword': 'Lezione'},
+            {'category': 'preparazione_lezioni', 'keyword': 'lezione'},
+            {'category': 'preparazione_lezioni', 'keyword': 'Lezione'},
         ]))
 
-        self.assertEqual(self._config(), {'didattica': ['lezione']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['lezione']})
 
     def test_the_same_keyword_on_two_categories_is_rejected(self):
         """The collision the matcher has no answer for: a title containing that
@@ -241,32 +241,32 @@ class HookSettingsTests(TestCase):
         refused at save time so the matcher never has to resolve it.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['lezione']})
+            config={'preparazione_lezioni': ['lezione']})
         self.client.force_login(self.user)
 
         response = self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'seminario'},
-            {'category': 'ricerca_base', 'keyword': 'seminario'},
+            {'category': 'preparazione_lezioni', 'keyword': 'seminario'},
+            {'category': 'ricevimento_studenti', 'keyword': 'seminario'},
         ]))
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context['form'].non_form_errors())
-        self.assertEqual(self._config(), {'didattica': ['lezione']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['lezione']})
 
     def test_moving_a_keyword_to_another_category_is_not_a_collision(self):
         """Moving a keyword means editing the category of its row: the old
         pairing is not in the POST any more, so it cannot collide.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['seminario']})
+            config={'preparazione_lezioni': ['seminario']})
         self.client.force_login(self.user)
 
         response = self.client.post('/hooks/', formset_post([
-            {'category': 'ricerca_base', 'keyword': 'seminario'},
+            {'category': 'ricevimento_studenti', 'keyword': 'seminario'},
         ], initial=1))
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self._config(), {'ricerca_base': ['seminario']})
+        self.assertEqual(self._config(), {'ricevimento_studenti': ['seminario']})
 
     def test_a_blank_keyword_is_rejected(self):
         """The worst bug this form can ship: '' is a substring of every title,
@@ -274,15 +274,15 @@ class HookSettingsTests(TestCase):
         empty the incerto branch outright.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['lezione']})
+            config={'preparazione_lezioni': ['lezione']})
         self.client.force_login(self.user)
 
         response = self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': '   '},
+            {'category': 'preparazione_lezioni', 'keyword': '   '},
         ]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self._config(), {'didattica': ['lezione']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['lezione']})
 
     def test_a_category_outside_the_vocabulary_is_rejected(self):
         """The select lives in the page, but the POST carries only strings: the
@@ -290,7 +290,7 @@ class HookSettingsTests(TestCase):
         or left in a tab opened before a release renamed the category.
         """
         Hook.objects.filter(docente=self.docente).update(
-            config={'didattica': ['lezione']})
+            config={'preparazione_lezioni': ['lezione']})
         self.client.force_login(self.user)
 
         response = self.client.post('/hooks/', formset_post([
@@ -298,7 +298,7 @@ class HookSettingsTests(TestCase):
         ]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self._config(), {'didattica': ['lezione']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['lezione']})
 
     def test_the_offered_categories_are_the_event_vocabulary(self):
         """One declaration builds the menu and checks the submit. If the two
@@ -318,16 +318,16 @@ class HookSettingsTests(TestCase):
         other_user = User.objects.create_user(username='altro')
         other = Docente.objects.create(user=other_user, id_unimore=7, cognome='Verdi')
         other_hook = Hook.objects.get(docente=other)
-        other_hook.config = {'ricerca_base': ['x']}
+        other_hook.config = {'ricevimento_studenti': ['x']}
         other_hook.save()
         self.client.force_login(self.user)
 
         self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'y'},
+            {'category': 'preparazione_lezioni', 'keyword': 'y'},
         ]))
 
         other_hook.refresh_from_db()
-        self.assertEqual(other_hook.config, {'ricerca_base': ['x']})
+        self.assertEqual(other_hook.config, {'ricevimento_studenti': ['x']})
 
     def test_a_config_that_is_not_a_mapping_renders_an_empty_form(self):
         """`Hook.config` is a free JSONField and rows predating this form can
@@ -353,10 +353,10 @@ class HookSettingsTests(TestCase):
         self.client.force_login(self.user)
 
         self.client.post('/hooks/', formset_post([
-            {'category': 'didattica', 'keyword': 'lezione'},
+            {'category': 'preparazione_lezioni', 'keyword': 'lezione'},
         ]))
 
-        self.assertEqual(self._config(), {'didattica': ['lezione']})
+        self.assertEqual(self._config(), {'preparazione_lezioni': ['lezione']})
 
     def test_user_without_docente_crashes_known_bug(self):
         """Known bug: the view dereferences request.user.docente with no guard,

@@ -1,0 +1,59 @@
+{% extends 'index.html' %}
+
+{% block titolo %}Impostazioni del timesheet{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl">
+    <a href="{{ back_url }}" class="inline-flex items-center gap-2 text-sm font-semibold text-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">
+        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4"><path d="M16 10H4M9 5l-5 5 5 5"/></svg>
+        Torna indietro
+    </a>
+
+    <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Impostazioni</h1>
+    <p class="mt-4 max-w-xl text-lg leading-relaxed">
+        Timesheet {{ timesheet.start_date|date:"m/Y" }} – {{ timesheet.end_date|date:"m/Y" }}.
+        Lascia vuoto un tetto se quella categoria non ha un limite di ore.
+    </p>
+
+    <form method="post" class="mt-10">
+        {% csrf_token %}
+
+        <section aria-labelledby="generali">
+            <h2 id="generali" class="font-serif text-2xl text-inchiostro">Generali</h2>
+            <div class="mt-4 flex flex-wrap gap-4 rounded-lg border border-linea bg-superficie px-5 py-4">
+                <div class="flex-1">
+                    <label for="{{ form.all_day_hours.id_for_label }}" class="text-sm font-semibold text-inchiostro">Ore di un evento giornata intera</label>
+                    <div class="mt-1">{{ form.all_day_hours }}</div>
+                    {{ form.all_day_hours.errors }}
+                </div>
+                <div class="flex-1">
+                    <label for="{{ form.total_hours_cap.id_for_label }}" class="text-sm font-semibold text-inchiostro">Tetto di ore totale</label>
+                    <div class="mt-1">{{ form.total_hours_cap }}</div>
+                    {{ form.total_hours_cap.errors }}
+                </div>
+            </div>
+        </section>
+
+        <section aria-labelledby="tetti" class="mt-10">
+            <h2 id="tetti" class="font-serif text-2xl text-inchiostro">Tetti per categoria</h2>
+            <div class="mt-4 divide-y divide-linea rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
+                {% for field in form.cap_fields %}
+                <div class="grid gap-2 px-5 py-3 sm:grid-cols-[minmax(0,3fr)_minmax(0,1fr)] sm:items-center sm:gap-4">
+                    <label for="{{ field.id_for_label }}" class="text-inchiostro">{{ field.label }}</label>
+                    <div>
+                        {{ field }}
+                        {{ field.errors }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <div class="mt-6 flex">
+            <button type="submit" class="ml-auto h-11 rounded-md bg-bosco px-7 font-semibold text-carta transition-colors hover:bg-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                Salva
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

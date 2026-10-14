@@ -6,6 +6,9 @@ Tabella eventi, condivisa fra classificati e incerti. Parametri:
                categorie ammesse (lista `categorie` di coppie valore/etichetta).
                Va inclusa dentro un <form>: ogni select si chiama
                categoria_<pk>, e vuota vuol dire "lascia l'evento incerto".
+  togli      - True per mostrare il bottone che cancella l'evento. Invia il
+               form "togli-evento" della pagina, non quello che contiene la
+               tabella.
 Gli eventi "giornata intera" arrivano da Google come mezzanotte-mezzanotte
 (vedi parse_google_datetime): mostrarli come 00:00-00:00 sembrerebbe un errore.
 {% endcomment %}
@@ -18,6 +21,7 @@ Gli eventi "giornata intera" arrivano da Google come mezzanotte-mezzanotte
                 <th scope="col" class="px-5 py-3 font-semibold whitespace-nowrap">Data</th>
                 <th scope="col" class="px-5 py-3 font-semibold">Orario</th>
                 {% if categoria or scelta %}<th scope="col" class="px-5 py-3 font-semibold">Categoria</th>{% endif %}
+                {% if togli %}<th scope="col" class="px-2 py-3"><span class="sr-only">Togli</span></th>{% endif %}
             </tr>
         </thead>
         <tbody class="divide-y divide-linea">
@@ -45,6 +49,13 @@ Gli eventi "giornata intera" arrivano da Google come mezzanotte-mezzanotte
                         <option value="{{ valore }}">{{ etichetta }}</option>
                         {% endfor %}
                     </select>
+                </td>
+                {% endif %}
+                {% if togli %}
+                <td class="px-2 py-2 text-right">
+                    <button type="submit" form="togli-evento" formaction="{% url 'classificationpipeline:event_delete' timesheet.pk evento.pk %}?{{ range_query }}" aria-label="Togli {{ evento.title|default:'(senza titolo)' }}, {{ evento.start_time|date:'d/m/Y' }}" title="Togli questo evento" class="flex size-9 items-center justify-center rounded-md text-grigio transition-colors hover:bg-linea/70 hover:text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" class="size-4"><path d="M5 5l10 10M15 5L5 15"/></svg>
+                    </button>
                 </td>
                 {% endif %}
             </tr>
