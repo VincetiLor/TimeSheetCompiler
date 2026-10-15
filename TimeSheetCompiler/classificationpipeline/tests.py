@@ -28,6 +28,7 @@ from openai import OpenAIError
 from authentication.models import Docente
 from authentication.services import GoogleCredentialsError
 from classificationpipeline.hours import check_caps, event_hours, hours_by_category
+from classificationpipeline.matching import match_category, title_chunks
 from classificationpipeline.models import Event, Timesheet, TimesheetHourCap
 from classificationpipeline.services import LLMClassificationError, ai_classificator
 
@@ -909,6 +910,20 @@ class EventImportTests(TestCase):
 
     @mock.patch('classificationpipeline.views.list_events')
     @mock.patch('classificationpipeline.views.get_calendar_service')
+    def test_a_misspelled_hook_keyword_still_classifies_the_event(
+            self, mock_service, mock_list):
+        payload = self._events_payload()
+        payload['items'][0]['summary'] = 'Lezzione di Analisi'
+        mock_list.return_value = payload
+
+        self.client.post(self.url, {'calendars': [CAL_A]})
+
+        lezione = Event.objects.get(event_id='ev-lezione')
+        self.assertEqual(lezione.status, Event.Status.CLASSIFICATO)
+        self.assertEqual(lezione.category, Event.Category.PREPARAZIONE_LEZIONI)
+
+    @mock.patch('classificationpipeline.views.list_events')
+    @mock.patch('classificationpipeline.views.get_calendar_service')
     def test_a_second_import_updates_rows_instead_of_duplicating_them(
             self, mock_service, mock_list):
         mock_list.return_value = self._events_payload()
@@ -1014,6 +1029,102 @@ class EventImportTests(TestCase):
 
         self.assertTrue(response.url.startswith('/index/?next='))
         mock_service.assert_not_called()
+
+
+@override_settings(KEYWORD_SIMILARITY_THRESHOLD=0.85)
+class MatchCategoryTests(SimpleTestCase):
+    """match_category: exact substring first, then similarity between each
+    keyword and the groups of title words as long as the keyword.
+    """
+
+    def test_title_chunks_have_the_length_of_the_keyword(self):
+        self.assertEqual(
+            title_chunks('consiglio di dipartimento straordinario', 3),
+            ['consiglio di dipartimento', 'di dipartimento straordinario'])
+
+    def test_a_title_shorter_than_the_keyword_is_one_chunk(self):
+        self.assertEqual(title_chunks('consiglio  straordinario', 3),
+                         ['consiglio straordinario'])
+
+    def test_an_exact_keyword_matches_ignoring_case(self):
+        hooks = {'preparazione_lezioni': ['lezione']}
+
+        self.assertEqual(match_category('LEZIONE di Analisi', hooks),
+                         'preparazione_lezioni')
+
+    def test_no_match_gives_an_empty_category(self):
+        hooks = {'preparazione_lezioni': ['lezione']}
+
+        self.assertEqual(match_category('Riunione', hooks), '')
+
+    def test_empty_hooks_give_an_empty_category(self):
+        self.assertEqual(match_category('Lezione', {}), '')
+
+    def test_on_exact_matches_the_first_category_wins(self):
+        hooks = {
+            'preparazione_lezioni': ['lezione'],
+            'ricevimento_studenti': ['ricevimento'],
+        }
+
+        self.assertEqual(match_category('Lezione e ricevimento', hooks),
+                         'preparazione_lezioni')
+
+    def test_a_misspelled_word_matches_by_similarity(self):
+        # 'lezzione' against 'lezione' is about 0.93; the whole title only 0.64
+        hooks = {'preparazione_lezioni': ['lezione']}
+
+        self.assertEqual(match_category('Lezzione fisica', hooks),
+                         'preparazione_lezioni')
+
+    def test_a_keyword_of_several_words_is_compared_with_groups_of_words(self):
+        hooks = {'compiti_organizzativi': ['consiglio di dipartimento']}
+
+        self.assertEqual(
+            match_category('Consiglio di dipartmento straordinario', hooks),
+            'compiti_organizzativi')
+
+    def test_a_short_keyword_with_one_wrong_letter_stays_below_threshold(self):
+        # 'lab' against 'lav' is about 0.67
+        hooks = {'didattica_integrativa': ['lab']}
+
+        self.assertEqual(match_category('Lav chimica', hooks), '')
+
+    def test_an_exact_match_wins_over_a_more_similar_earlier_category(self):
+        hooks = {
+            'ricevimento_studenti': ['lezioni'],
+            'preparazione_lezioni': ['lezione'],
+        }
+
+        self.assertEqual(match_category('Lezione fisica', hooks),
+                         'preparazione_lezioni')
+
+    def test_the_most_similar_category_wins(self):
+        # 'esame' against 'esami' is 0.8, 'lezione' against 'lezzione' 0.93
+        hooks = {
+            'esami_profitto': ['esami'],
+            'preparazione_lezioni': ['lezione'],
+        }
+
+        with self.settings(KEYWORD_SIMILARITY_THRESHOLD=0.8):
+            self.assertEqual(match_category('Esame lezzione', hooks),
+                             'preparazione_lezioni')
+
+    def test_on_equal_similarity_the_first_category_wins(self):
+        hooks = {
+            'preparazione_lezioni': ['lezione'],
+            'ricevimento_studenti': ['lezione'],
+        }
+
+        self.assertEqual(match_category('Lezzione', hooks),
+                         'preparazione_lezioni')
+
+    def test_a_score_equal_to_the_threshold_is_accepted(self):
+        # 'esame' against 'esami' is exactly 0.8
+        hooks = {'esami_profitto': ['esame']}
+
+        with self.settings(KEYWORD_SIMILARITY_THRESHOLD=0.8):
+            self.assertEqual(match_category('Esami', hooks), 'esami_profitto')
+        self.assertEqual(match_category('Esami', hooks), '')
 
 
 @override_settings(SHIBBOLETH_DEV_MODE=False)

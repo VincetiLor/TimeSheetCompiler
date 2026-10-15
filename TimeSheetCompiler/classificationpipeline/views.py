@@ -14,6 +14,7 @@ from hooks.models import Hook
 from .compilation import CapsExceededError, compile_events
 from .forms import TimesheetSettingsForm
 from .hours import check_caps
+from .matching import match_category
 from .models import Event, Timesheet
 from authentication.services import (
     GoogleCredentialsError,
@@ -312,12 +313,7 @@ def event_compare(request, timesheet_id):
 
             if event_obj.status != Event.Status.INCERTO:
                 continue
-            title = event.get('summary', '').lower()
-            found_category = ''
-            for category, keywords in hooks.items():
-                if any(keyword in title for keyword in keywords):
-                    found_category = category
-                    break
+            found_category = match_category(event.get('summary', ''), hooks)
             if found_category:
                 event_obj.category = found_category
                 event_obj.status = Event.Status.CLASSIFICATO

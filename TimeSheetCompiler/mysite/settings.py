@@ -125,6 +125,7 @@ OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')
 OPENAI_TIMEOUT = float(os.environ.get('OPENAI_TIMEOUT', '30'))
 LLM_CONFIDENCE_THRESHOLD = int(os.environ.get('LLM_CONFIDENCE_THRESHOLD', '70'))
+KEYWORD_SIMILARITY_THRESHOLD = float(os.environ.get('KEYWORD_SIMILARITY_THRESHOLD', '0.85'))
 
 ROOT_URLCONF = 'mysite.urls'
 

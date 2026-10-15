@@ -11,8 +11,7 @@ class CapsExceededError(Exception):
         self.rows = rows
 
 
-def write_to_esse3(timesheet, events):
-    # Placeholder: Selenium will write the events on Esse3 here
+def write_to_esse3(timesheet, events):\
     pass
 
 

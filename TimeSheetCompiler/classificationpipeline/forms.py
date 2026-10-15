@@ -6,7 +6,7 @@ from .models import Event, TimesheetHourCap
 # An empty field means no cap
 class TimesheetSettingsForm(forms.Form):
 
-    # 'campo' is defined in tailwind/input.css: Tailwind does not read .py files
+    # 'campo' is defined in tailwind/input.css
     all_day_hours = forms.IntegerField(
         min_value=0, max_value=24,
         widget=forms.NumberInput(attrs={'class': 'campo'}))

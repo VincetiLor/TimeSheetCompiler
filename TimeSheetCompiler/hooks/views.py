@@ -5,47 +5,75 @@ from .models import Hook
 from classificationpipeline.models import Event
 
 
+# One row per category, always all of them, in the order of Event.Category
 def config_to_rows(config):
     if not isinstance(config, dict):
-        return []
+        config = {}
+
     rows = []
-    for category, keywords in config.items():
-        if not isinstance(keywords, (list, tuple)):
-            continue
-        for keyword in keywords:
-            rows.append({'category': category, 'keyword': keyword})
+    for category, label in Event.Category.choices:
+        saved_keywords = config.get(category)
+        if not isinstance(saved_keywords, (list, tuple)):
+            saved_keywords = []
+
+        text_keywords = []
+        for keyword in saved_keywords:
+            if isinstance(keyword, str):
+                text_keywords.append(keyword)
+
+        rows.append({'category': category, 'keywords': '; '.join(text_keywords)})
 
     return rows
 
+# row['keywords'] is the list returned by clean_keywords
 def rows_to_config(rows):
 
     config = {}
     for row in rows:
-        keywords = config.setdefault(row['category'], [])
-        if row['keyword'] not in keywords:
-            keywords.append(row['keyword'])
+        row_keywords = row['keywords']
+        if not row_keywords:
+            continue
+
+        saved_keywords = config.setdefault(row['category'], [])
+        for keyword in row_keywords:
+            if keyword not in saved_keywords:
+                saved_keywords.append(keyword)
 
     return config
 
 
 class HookRuleForm(forms.Form):
     
-    # La classe 'campo' e' definita in tailwind/input.css: Tailwind non legge
-    # i file .py, quindi qui non si possono usare le sue utility.
     category = forms.ChoiceField(
         choices=Event.Category.choices,
-        widget=forms.Select(attrs={'class': 'campo'}))
-    keyword = forms.CharField(
-        max_length=100,
-        widget=forms.TextInput(attrs={'class': 'campo', 'placeholder': 'es. lezione'}))
+        widget=forms.HiddenInput())
+    keywords = forms.CharField(
+        required=False,
+        max_length=500,
+        widget=forms.TextInput(attrs={'class': 'campo', 'placeholder': 'es. lezione; appello'}))
+
+    def category_label(self):
+        category = self.initial['category']
+        for code, label in Event.Category.choices:
+            if category == code: return label
 
 
-    def clean_keyword(self):
-        return self.cleaned_data['keyword'].strip().lower()
+    def clean_keywords(self):
+        keywords = self.cleaned_data['keywords']
+        cleaned_keywords = []
+        for keyword in keywords.split(';'):
+            keyword = keyword.strip().lower()
+            if keyword == '' or keyword in cleaned_keywords:
+                continue
+            cleaned_keywords.append(keyword)
+        
+        return cleaned_keywords
+    
+
 
 class BaseHookRuleFormSet(forms.BaseFormSet):
 
-      def clean(self):
+      def clean(self):  
           
           super().clean()
           if any(self.errors):
@@ -55,21 +83,19 @@ class BaseHookRuleFormSet(forms.BaseFormSet):
           for form in self.forms:
               if not form.cleaned_data:
                   continue
-              keyword = form.cleaned_data['keyword']
               category = form.cleaned_data['category']
-              previous_category = category_per_keyword.get(keyword)
-              if previous_category is not None and previous_category != category:
-                  labels = dict(Event.Category.choices)
-                  raise forms.ValidationError(
-                      f"La parola chiave «{keyword}» è assegnata sia a "
-                      f"«{labels[previous_category]}» sia a «{labels[category]}»: "
-                      f"scegline una."
-                  )
-              category_per_keyword[keyword] = category
+              for keyword in form.cleaned_data['keywords']:
+                  previous_category = category_per_keyword.get(keyword)
+                  if previous_category is not None and previous_category != category:
+                      labels = dict(Event.Category.choices)
+                      raise forms.ValidationError(
+                          f"La parola chiave «{keyword}» è assegnata sia a "
+                          f"«{labels[previous_category]}» sia a «{labels[category]}»: "
+                          f"scegline una."
+                      )
+                  category_per_keyword[keyword] = category
 
-# Niente riga vuota di default (extra=0) e niente checkbox DELETE: le righe si
-# aggiungono e si tolgono dal fondo con i due bottoni della pagina, e una riga
-# tolta semplicemente non arriva nel POST. Vedi DECISIONS.md.
+# One fixed row per category, built by config_to_rows: no extra rows, no DELETE
 HookRuleFormSet = forms.formset_factory(
       HookRuleForm, formset=BaseHookRuleFormSet, extra=0)
 
