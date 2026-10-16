@@ -12,7 +12,7 @@
     <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Impostazioni</h1>
     <p class="mt-4 max-w-xl text-lg leading-relaxed">
         Timesheet {{ timesheet.start_date|date:"m/Y" }} – {{ timesheet.end_date|date:"m/Y" }}.
-        Lascia vuoto un tetto se quella categoria non ha un limite di ore.
+        Lascia vuota una soglia se quella categoria non ha un limite di ore.
     </p>
 
     <form method="post" class="mt-10">
@@ -27,15 +27,15 @@
                     {{ form.all_day_hours.errors }}
                 </div>
                 <div class="flex-1">
-                    <label for="{{ form.total_hours_cap.id_for_label }}" class="text-sm font-semibold text-inchiostro">Tetto di ore totale</label>
+                    <label for="{{ form.total_hours_cap.id_for_label }}" class="text-sm font-semibold text-inchiostro">Soglia di ore totale</label>
                     <div class="mt-1">{{ form.total_hours_cap }}</div>
                     {{ form.total_hours_cap.errors }}
                 </div>
             </div>
         </section>
 
-        <section aria-labelledby="tetti" class="mt-10">
-            <h2 id="tetti" class="font-serif text-2xl text-inchiostro">Tetti per categoria</h2>
+        <section aria-labelledby="soglie" class="mt-10">
+            <h2 id="soglie" class="font-serif text-2xl text-inchiostro">Soglie per categoria</h2>
             <div class="mt-4 divide-y divide-linea rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
                 {% for field in form.cap_fields %}
                 <div class="grid gap-2 px-5 py-3 sm:grid-cols-[minmax(0,3fr)_minmax(0,1fr)] sm:items-center sm:gap-4">

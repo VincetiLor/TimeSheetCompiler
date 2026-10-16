@@ -13,12 +13,12 @@
 </head>
 <body class="min-h-screen bg-fondo font-sans text-grigio antialiased">
     <header class="border-b border-linea bg-carta">
-        <div class="mx-auto flex max-w-5xl items-center px-4 py-4 sm:px-8">
+        <div class="mx-auto flex {% block larghezza_header %}max-w-5xl{% endblock %} items-center px-4 py-4 sm:px-8">
             <a href="{% url 'index' %}" class="font-serif text-xl text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">Timesheet Compiler</a>
         </div>
     </header>
 
-    <main class="mx-auto max-w-5xl px-4 py-12 sm:px-8 sm:py-20">
+    <main class="mx-auto {% block larghezza_main %}max-w-5xl{% endblock %} px-4 py-12 sm:px-8 sm:py-20">
         {% block content %}{% endblock %}
     </main>
 

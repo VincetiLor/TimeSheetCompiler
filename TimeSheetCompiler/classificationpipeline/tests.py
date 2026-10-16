@@ -1928,7 +1928,7 @@ class EventPageCapsTests(TestCase):
         response = self.client.get(page('event_compare', self.timesheet))
 
         self.assertEqual(response.context['caps'], [])
-        self.assertNotContains(response, 'Tetti di ore')
+        self.assertNotContains(response, 'Soglie di ore')
 
     def test_a_cap_within_its_limit_is_shown_without_warning(self):
         TimesheetHourCap.objects.create(
@@ -1937,8 +1937,8 @@ class EventPageCapsTests(TestCase):
         response = self.client.get(page('event_compare', self.timesheet))
 
         self.assertFalse(response.context['over_caps'])
-        self.assertContains(response, 'Entro il tetto')
-        self.assertNotContains(response, 'Alcuni tetti sono superati')
+        self.assertContains(response, 'Soglie di ore')
+        self.assertNotContains(response, 'Alcune soglie sono superate')
 
     def test_an_exceeded_cap_is_shown_with_a_link_to_the_settings(self):
         TimesheetHourCap.objects.create(
@@ -1947,9 +1947,8 @@ class EventPageCapsTests(TestCase):
         response = self.client.get(page('event_compare', self.timesheet))
 
         self.assertTrue(response.context['over_caps'])
-        self.assertContains(response, 'Oltre di 1 h')
-        self.assertContains(response, 'Alcuni tetti sono superati')
-        self.assertContains(response, 'Non si può compilare finché un tetto è superato.')
+        self.assertContains(response, 'Alcune soglie sono superate')
+        self.assertContains(response, 'Non si può compilare finché una soglia è superata.')
 
 
 @override_settings(SHIBBOLETH_DEV_MODE=False)

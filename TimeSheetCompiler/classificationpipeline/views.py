@@ -443,7 +443,7 @@ def timesheet_compile(request, timesheet_id):
     try:
         compiled = compile_events(timesheet, events, start, end)
     except CapsExceededError:
-        messages.error(request, "Alcuni tetti di ore sono superati: non è stato compilato niente.")
+        messages.error(request, "Alcune soglie di ore sono superate: non è stato compilato niente.")
     else:
         if compiled:
             messages.success(request, f"Eventi compilati: {compiled}.")

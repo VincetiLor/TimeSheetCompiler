@@ -69,7 +69,7 @@
         const form = document.getElementById('form-calendari');
         if (!form) return;
 
-        // Tetto per invio, solo lato client: ogni calendario e' una chiamata
+        // Soglia per invio, solo lato client: ogni calendario e' una chiamata
         // sincrona a Google dentro la richiesta (vedi event_compare).
         const MASSIMO = 3;
         const corpo = document.getElementById('corpo-calendari');

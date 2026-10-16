@@ -1,6 +1,6 @@
 {% extends 'index.html' %}
 
-{% block titolo %}Timesheet{% endblock %}
+{% block titolo %}Timesheets{% endblock %}
 
 {% block content %}
 <div class="max-w-3xl">
@@ -9,11 +9,7 @@
         Torna alla home
     </a>
 
-    <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Timesheet</h1>
-    <p class="mt-4 max-w-xl text-lg leading-relaxed">
-        Apri un timesheet e scegli le date su cui vuoi lavorare, oppure creane
-        uno nuovo.
-    </p>
+    <h1 class="mt-8 font-serif text-4xl leading-tight text-inchiostro sm:text-5xl">Timesheets</h1>
 
     {% for message in messages %}
     <p role="alert" class="mt-8 rounded-md border border-linea bg-superficie px-5 py-3 font-semibold text-inchiostro">{{ message }}</p>
@@ -38,6 +34,7 @@
                     </summary>
 
                     <form method="get" class="mt-4">
+                        <p class="mb-3">Su quali date vuoi lavorare?</p>
                         <div class="flex flex-wrap gap-4">
                             <label class="flex-1 text-sm font-semibold text-inchiostro">
                                 Dal
@@ -91,7 +88,7 @@
 
     <section aria-labelledby="nuovo" class="mt-12">
         <h2 id="nuovo" class="font-serif text-2xl text-inchiostro">Nuovo timesheet</h2>
-        <p class="mt-2 max-w-xl">Scegli il primo e l'ultimo mese che il timesheet copre.</p>
+        <p class="mt-2 max-w-xl">Scegli i mesi che il timesheet copre.</p>
 
         <form method="post" action="{% url 'classificationpipeline:timesheet_create' %}" class="mt-4">
             {% csrf_token %}
