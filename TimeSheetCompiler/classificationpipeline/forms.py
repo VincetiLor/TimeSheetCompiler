@@ -8,7 +8,7 @@ class TimesheetSettingsForm(forms.Form):
 
     # 'campo' is defined in tailwind/input.css
     all_day_hours = forms.IntegerField(
-        min_value=0, max_value=24,
+        min_value=0, max_value=8,
         widget=forms.NumberInput(attrs={'class': 'campo'}))
     total_hours_cap = forms.IntegerField(
         min_value=0, required=False,

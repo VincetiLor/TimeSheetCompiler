@@ -27,7 +27,9 @@ from openai import OpenAIError
 
 from authentication.models import Docente
 from authentication.services import GoogleCredentialsError
-from classificationpipeline.hours import check_caps, event_hours, hours_by_category
+from classificationpipeline.hours import (
+    check_caps, event_hours, events_by_day, hhmm_to_minutes, hours_by_category,
+    minutes_to_hhmm, plan_day)
 from classificationpipeline.matching import match_category, title_chunks
 from classificationpipeline.models import Event, Timesheet, TimesheetHourCap
 from classificationpipeline.services import LLMClassificationError, ai_classificator
@@ -432,6 +434,17 @@ class TimesheetSettingsTests(TestCase):
         self.timesheet.refresh_from_db()
         self.assertEqual(self.timesheet.all_day_hours, 8)
         self.assertEqual(self.caps(), {})
+
+    def test_all_day_hours_cannot_exceed_the_8_hours_of_a_day(self):
+        self.timesheet.all_day_hours = 6
+        self.timesheet.save()
+
+        response = self.client.post(self.url, {'all_day_hours': '9'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('all_day_hours', response.context['form'].errors)
+        self.timesheet.refresh_from_db()
+        self.assertEqual(self.timesheet.all_day_hours, 6)
 
     def test_saving_goes_back_to_the_page_in_next(self):
         events_page = page('event_compare', self.timesheet)
@@ -1502,7 +1515,7 @@ class ClosedTimesheetTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertTrue(Event.objects.filter(pk=self.event.pk).exists())
 
-    @mock.patch('classificationpipeline.compilation.write_to_esse3')
+    @mock.patch('classificationpipeline.compilation_sync.write_to_esse3')
     def test_compilation_is_forbidden(self, mock_write):
         make_event(self.timesheet, 'evt-2', status=Event.Status.CLASSIFICATO)
 
@@ -1786,6 +1799,143 @@ class EventHoursTests(SimpleTestCase):
     def test_no_events_gives_no_hours(self):
         self.assertEqual(hours_by_category([], 8, RANGE_START, RANGE_END), {})
 
+    def test_events_by_day_gives_the_minutes_of_each_event_on_its_day(self):
+        first = self._timed(MARCH_10, 2)
+        second = self._timed(MARCH_10 + timedelta(hours=3), 1.5)
+        other_day = self._timed(MARCH_10 + timedelta(days=1), 1)
+
+        days = events_by_day([first, second, other_day], 8, RANGE_START, RANGE_END)
+
+        self.assertEqual(days, {
+            date(2026, 3, 10): [(first, 120), (second, 90)],
+            date(2026, 3, 11): [(other_day, 60)],
+        })
+
+    def test_events_by_day_rounds_to_whole_minutes(self):
+        # 1h20 is 1.333... hours: 79.99... minutes before rounding
+        event = self._timed(MARCH_10, 80 / 60)
+
+        days = events_by_day([event], 8, RANGE_START, RANGE_END)
+
+        self.assertEqual(days, {date(2026, 3, 10): [(event, 80)]})
+
+    def test_events_by_day_splits_an_all_day_event_and_skips_days_outside_the_range(self):
+        # 30 March - 2 April, working range March: only the 30th and 31st
+        event = self._all_day(date(2026, 3, 30), 4)
+
+        days = events_by_day([event], 6, RANGE_START, RANGE_END)
+
+        self.assertEqual(days, {
+            date(2026, 3, 30): [(event, 360)],
+            date(2026, 3, 31): [(event, 360)],
+        })
+
+    def test_events_by_day_leaves_out_events_outside_the_range(self):
+        april = self._timed(datetime(2026, 4, 10, 10, 0, tzinfo=ROME), 2)
+
+        self.assertEqual(events_by_day([april], 8, RANGE_START, RANGE_END), {})
+
+
+class PlanDayTests(SimpleTestCase):
+    """What to write in the diary cells of one day, at most 8 hours in all.
+    Events are built without saving them: plan_day only reads their fields.
+    """
+
+    def _event(self, hour, category):
+        start = datetime(2026, 3, 10, hour, 0, tzinfo=ROME)
+        return Event(start_time=start, end_time=start, category=category)
+
+    def test_an_empty_day_takes_every_event_whole(self):
+        exam = self._event(9, Event.Category.ESAMI_PROFITTO)
+        office_hours = self._event(11, Event.Category.RICEVIMENTO_STUDENTI)
+
+        cells, written = plan_day({}, [(exam, 120), (office_hours, 90)])
+
+        self.assertEqual(cells, {'esami_profitto': 120, 'ricevimento_studenti': 90})
+        self.assertEqual(written, [(exam, 120), (office_hours, 90)])
+
+    def test_empty_cells_first_then_the_last_event_that_fits_is_cut(self):
+        # 6 hours already in the diary, 2 free: B whole, C cut to 30, A left out
+        present = {'esami_profitto': 120, 'preparazione_lezioni': 240}
+        a = self._event(9, Event.Category.ESAMI_PROFITTO)
+        b = self._event(11, Event.Category.RICEVIMENTO_STUDENTI)
+        c = self._event(15, Event.Category.RICEVIMENTO_STUDENTI)
+
+        cells, written = plan_day(present, [(a, 60), (b, 90), (c, 60)])
+
+        self.assertEqual(cells, {'ricevimento_studenti': 120})
+        self.assertEqual(written, [(b, 90), (c, 30)])
+
+    def test_a_filled_cell_gets_the_sum(self):
+        exam = self._event(9, Event.Category.ESAMI_PROFITTO)
+
+        cells, written = plan_day({'esami_profitto': 120}, [(exam, 60)])
+
+        self.assertEqual(cells, {'esami_profitto': 180})
+        self.assertEqual(written, [(exam, 60)])
+
+    def test_a_full_day_is_skipped(self):
+        exam = self._event(9, Event.Category.ESAMI_PROFITTO)
+
+        self.assertEqual(plan_day({'master': 480}, [(exam, 60)]), ({}, []))
+
+    def test_a_day_over_8_hours_by_hand_is_skipped(self):
+        exam = self._event(9, Event.Category.ESAMI_PROFITTO)
+
+        self.assertEqual(plan_day({'master': 540}, [(exam, 60)]), ({}, []))
+
+    def test_inside_a_group_the_earlier_event_goes_first(self):
+        late = self._event(15, Event.Category.MASTER)
+        early = self._event(9, Event.Category.DOTTORATI)
+
+        cells, written = plan_day({}, [(late, 300), (early, 300)])
+
+        self.assertEqual(written, [(early, 300), (late, 180)])
+        self.assertEqual(cells, {'dottorati': 300, 'master': 180})
+
+    def test_two_events_of_an_empty_cell_add_up_in_that_cell(self):
+        first = self._event(9, Event.Category.MASTER)
+        second = self._event(11, Event.Category.MASTER)
+
+        cells, written = plan_day({}, [(first, 60), (second, 30)])
+
+        self.assertEqual(cells, {'master': 90})
+        self.assertEqual(written, [(first, 60), (second, 30)])
+
+    def test_an_exact_fit_leaves_the_next_event_out(self):
+        first = self._event(9, Event.Category.MASTER)
+        second = self._event(11, Event.Category.DOTTORATI)
+
+        cells, written = plan_day({'pnrr': 360}, [(first, 120), (second, 60)])
+
+        self.assertEqual(written, [(first, 120)])
+        self.assertEqual(cells, {'master': 120})
+
+
+class HhmmConversionTests(SimpleTestCase):
+    """Esse3 diary cells hold HH:MM, we count whole minutes."""
+
+    def test_minutes_to_hhmm(self):
+        self.assertEqual(minutes_to_hhmm(0), '00:00')
+        self.assertEqual(minutes_to_hhmm(5), '00:05')
+        self.assertEqual(minutes_to_hhmm(90), '01:30')
+        self.assertEqual(minutes_to_hhmm(480), '08:00')
+
+    def test_59_and_60_minutes_never_give_00_60(self):
+        self.assertEqual(minutes_to_hhmm(59), '00:59')
+        self.assertEqual(minutes_to_hhmm(60), '01:00')
+
+    def test_hhmm_to_minutes(self):
+        self.assertEqual(hhmm_to_minutes('02:30'), 150)
+        self.assertEqual(hhmm_to_minutes('08:00'), 480)
+        self.assertEqual(hhmm_to_minutes('00:00'), 0)
+
+    def test_an_empty_cell_is_zero_minutes(self):
+        self.assertEqual(hhmm_to_minutes(''), 0)
+
+    def test_a_value_survives_the_round_trip(self):
+        self.assertEqual(hhmm_to_minutes(minutes_to_hhmm(135)), 135)
+
 
 class HourCapModelTests(TestCase):
 
@@ -1852,7 +2002,7 @@ class CheckCapsTests(TestCase):
     def test_compiled_hours_of_the_whole_timesheet_add_to_the_new_ones(self):
         self.cap(Event.Category.PREPARAZIONE_LEZIONI, 5)
         make_event(self.timesheet, 'evt-jan', start=datetime(2026, 1, 15, 10, 0, tzinfo=ROME),
-                   status=Event.Status.COMPILATO)
+                   status=Event.Status.COMPILATO, compile_minutes=120)
         make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
         make_event(self.timesheet, 'evt-2', start=MARCH_10 + timedelta(days=1),
                    status=Event.Status.CLASSIFICATO)
@@ -1864,6 +2014,23 @@ class CheckCapsTests(TestCase):
         self.assertEqual(row['to_compile'], 4)
         self.assertEqual(row['used'], 6)
         self.assertEqual(row['excess'], 1)
+
+    def test_a_cut_compiled_event_counts_only_the_minutes_written(self):
+        # 2 hour event, only 1h30 written on Esse3
+        self.cap(Event.Category.PREPARAZIONE_LEZIONI, 10)
+        make_event(self.timesheet, 'evt-cut', status=Event.Status.COMPILATO, compile_minutes=90)
+
+        [row] = self.check()
+
+        self.assertEqual(row['compiled'], 1.5)
+
+    def test_a_compiled_event_without_minutes_counts_zero(self):
+        self.cap(Event.Category.PREPARAZIONE_LEZIONI, 10)
+        make_event(self.timesheet, 'evt-1', status=Event.Status.COMPILATO)
+
+        [row] = self.check()
+
+        self.assertEqual(row['compiled'], 0)
 
     def test_a_cap_reached_exactly_is_not_exceeded(self):
         self.cap(Event.Category.PREPARAZIONE_LEZIONI, 2)
@@ -1962,7 +2129,7 @@ class TimesheetCompileTests(TestCase):
         self.timesheet = make_timesheet(self.docente)
         self.url = page('timesheet_compile', self.timesheet)
         self.client.force_login(self.user)
-        patcher = mock.patch('classificationpipeline.compilation.write_to_esse3')
+        patcher = mock.patch('classificationpipeline.compilation_sync.write_to_esse3')
         self.mock_write = patcher.start()
         self.addCleanup(patcher.stop)
 

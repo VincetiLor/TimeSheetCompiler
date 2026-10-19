@@ -4,6 +4,19 @@ from django.utils import timezone
 
 from .models import Event
 
+DAY_MINUTES = 8 * 60
+
+
+def minutes_to_hhmm(minutes):
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def hhmm_to_minutes(text):
+    if text == '':
+        return 0
+    hours, minutes = text.split(':')
+    return int(hours) * 60 + int(minutes)
+
 
 def event_hours(event, all_day_hours):
     # {day: hours}. A timed event counts on the day it starts.
@@ -34,6 +47,60 @@ def hours_by_category(events, all_day_hours, start, end):
     return totals
 
 
+def events_by_day(events, all_day_hours, start, end):
+    # {day: [(event, minutes), ...]}, only the days between start and end
+    days = {}
+    for event in events:
+        for day, hours in event_hours(event, all_day_hours).items():
+            if day < start or day > end:
+                continue
+            if day not in days:
+                days[day] = []
+            days[day].append((event, round(hours * 60)))
+    return days
+
+
+def event_start(pair):
+    return pair[0].start_time
+
+
+def plan_day(present, day_events):
+    # present: {category: minutes} already in the diary that day.
+    # Returns ({category: minutes to write in the cell}, [(event, minutes written), ...])
+    free = DAY_MINUTES - sum(present.values())
+
+    empty_cells = []
+    filled_cells = []
+    for event, minutes in sorted(day_events, key=event_start):
+        if present.get(event.category, 0) == 0:
+            empty_cells.append((event, minutes))
+        else:
+            filled_cells.append((event, minutes))
+
+    cells = {}
+    written = []
+    for event, minutes in empty_cells + filled_cells:
+        if free <= 0:
+            break
+        minutes = min(minutes, free)
+        if event.category not in cells:
+            cells[event.category] = present.get(event.category, 0)
+        cells[event.category] += minutes
+        written.append((event, minutes))
+        free -= minutes
+    return cells, written
+
+
+def compiled_hours_by_category(events):
+    # {category: hours} from the minutes actually written on Esse3
+    totals = {}
+    for event in events:
+        if event.compile_minutes is None:
+            continue
+        totals[event.category] = totals.get(event.category, 0) + event.compile_minutes / 60
+    return totals
+
+
 def cap_row(label, max_hours, compiled, to_compile):
     used = compiled + to_compile
     return {
@@ -50,8 +117,7 @@ def check_caps(timesheet, to_compile, start, end):
     # One row per cap: hours already compiled in the whole timesheet plus the
     # hours of to_compile inside start-end. excess > 0 means the cap is exceeded.
     compiled_events = timesheet.events.filter(status=Event.Status.COMPILATO)
-    compiled = hours_by_category(
-        compiled_events, timesheet.all_day_hours, timesheet.start_date, timesheet.end_date)
+    compiled = compiled_hours_by_category(compiled_events)
     new = hours_by_category(to_compile, timesheet.all_day_hours, start, end)
 
     max_hours_by_category = {}

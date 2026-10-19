@@ -104,6 +104,7 @@ class Event(models.Model):
         blank=True,
         default='',
     )
+    compile_minutes = models.PositiveIntegerField(null=True, blank=True)
 
     objects = EventQuerySet.as_manager()
 

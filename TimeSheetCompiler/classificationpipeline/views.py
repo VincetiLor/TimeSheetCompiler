@@ -11,7 +11,7 @@ from calendar import monthrange
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from hooks.models import Hook
-from .compilation import CapsExceededError, compile_events
+from .compilation_sync import CapsExceededError, compile_events
 from .forms import TimesheetSettingsForm
 from .hours import check_caps
 from .matching import match_category
