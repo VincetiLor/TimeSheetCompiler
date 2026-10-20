@@ -11,7 +11,8 @@ function in ClassificaIncertiAiTests.
 import json
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
-from unittest import mock
+from pathlib import Path
+from unittest import SkipTest, mock
 from zoneinfo import ZoneInfo
 
 import httplib2
@@ -24,9 +25,14 @@ from django.utils import timezone
 from django.utils.http import urlencode
 from googleapiclient.errors import HttpError
 from openai import OpenAIError
+from selenium.common.exceptions import WebDriverException
 
 from authentication.models import Docente
 from authentication.services import GoogleCredentialsError
+from classificationpipeline.compilation_sync import (
+    Esse3PeriodError, Esse3SaveError, compile_events, fill_diary, save_day, write_to_esse3)
+from classificationpipeline.esse3_compilation import (
+    CATEGORY_CODES, open_driver, page_period, read_page, write_page)
 from classificationpipeline.hours import (
     check_caps, event_hours, events_by_day, hhmm_to_minutes, hours_by_category,
     minutes_to_hhmm, plan_day)
@@ -2118,6 +2124,14 @@ class EventPageCapsTests(TestCase):
         self.assertContains(response, 'Non si può compilare finché una soglia è superata.')
 
 
+def write_on_empty_diary(timesheet, events, start, end, credentials):
+    # Stands in for the bot: every diary day is empty, one save per day
+    days = events_by_day(events, timesheet.all_day_hours, start, end)
+    for day in sorted(days):
+        cells, written = plan_day({}, days[day])
+        save_day(written)
+
+
 @override_settings(SHIBBOLETH_DEV_MODE=False)
 class TimesheetCompileTests(TestCase):
     """write_to_esse3 is patched: the tests check what compile_events does
@@ -2129,7 +2143,8 @@ class TimesheetCompileTests(TestCase):
         self.timesheet = make_timesheet(self.docente)
         self.url = page('timesheet_compile', self.timesheet)
         self.client.force_login(self.user)
-        patcher = mock.patch('classificationpipeline.compilation_sync.write_to_esse3')
+        patcher = mock.patch('classificationpipeline.compilation_sync.write_to_esse3',
+                             side_effect=write_on_empty_diary)
         self.mock_write = patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -2148,9 +2163,12 @@ class TimesheetCompileTests(TestCase):
         self.assertEqual(self.status(first), Event.Status.COMPILATO)
         self.assertEqual(self.status(second), Event.Status.COMPILATO)
         self.assertEqual(message_texts(response), ['Eventi compilati: 2.'])
-        [timesheet, events] = self.mock_write.call_args.args
+        first.refresh_from_db()
+        self.assertEqual(first.compile_minutes, 120)
+        [timesheet, events, start, end, credentials] = self.mock_write.call_args.args
         self.assertEqual(timesheet, self.timesheet)
         self.assertEqual(sorted(event.event_id for event in events), ['evt-1', 'evt-2'])
+        self.assertEqual((start, end), (RANGE_START, RANGE_END))
 
     def test_uncertain_events_and_events_outside_the_range_are_left_alone(self):
         uncertain = make_event(self.timesheet, 'evt-1')
@@ -2207,3 +2225,366 @@ class TimesheetCompileTests(TestCase):
 
         self.assertContains(response, self.url.replace('&', '&amp;'))
         self.assertNotContains(response, 'disabled aria-describedby="nota-compila"')
+
+
+def diary_with(present, crash_after_days=None):
+    # Stands in for the bot on a diary that already has hours.
+    # present: {day: {category: minutes}}. With crash_after_days the browser
+    # dies after saving that many days.
+    def write(timesheet, events, start, end, credentials):
+        days = events_by_day(events, timesheet.all_day_hours, start, end)
+        saved = 0
+        for day in sorted(days):
+            if saved == crash_after_days:
+                raise ConnectionError('browser closed')
+            cells, written = plan_day(present.get(day, {}), days[day])
+            save_day(written)
+            saved += 1
+    return write
+
+
+class CompileEventsTests(TestCase):
+    """compile_events with write_to_esse3 patched: what ends up in the DB
+    when Esse3 takes only part of the hours.
+    """
+
+    def setUp(self):
+        self.user, self.docente = make_docente()
+        self.timesheet = make_timesheet(self.docente)
+
+    def compile(self, write):
+        with mock.patch('classificationpipeline.compilation_sync.write_to_esse3',
+                        side_effect=write):
+            events = Event.objects.filter(status=Event.Status.CLASSIFICATO)
+            return compile_events(self.timesheet, events, RANGE_START, RANGE_END, None)
+
+    def test_days_saved_before_a_crash_stay_compilato(self):
+        first = make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+        second = make_event(self.timesheet, 'evt-2', start=MARCH_10 + timedelta(days=1),
+                            status=Event.Status.CLASSIFICATO)
+
+        with self.assertRaises(ConnectionError):
+            self.compile(diary_with({}, crash_after_days=1))
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.status, Event.Status.COMPILATO)
+        self.assertEqual(first.compile_minutes, 120)
+        self.assertEqual(second.status, Event.Status.CLASSIFICATO)
+        self.assertIsNone(second.compile_minutes)
+
+    def test_an_event_that_does_not_fit_is_cut_and_the_next_one_is_left_out(self):
+        cut = make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+        left_out = make_event(self.timesheet, 'evt-2', start=MARCH_10 + timedelta(hours=3),
+                              status=Event.Status.CLASSIFICATO)
+        present = {MARCH_10.date(): {Event.Category.ESAMI_PROFITTO: 7 * 60}}
+
+        compiled = self.compile(diary_with(present))
+
+        self.assertEqual(compiled, 1)
+        cut.refresh_from_db()
+        left_out.refresh_from_db()
+        self.assertEqual(cut.status, Event.Status.COMPILATO)
+        self.assertEqual(cut.compile_minutes, 60)
+        self.assertEqual(left_out.status, Event.Status.CLASSIFICATO)
+        self.assertIsNone(left_out.compile_minutes)
+
+    def test_a_full_day_writes_nothing(self):
+        event = make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+        present = {MARCH_10.date(): {Event.Category.ESAMI_PROFITTO: 8 * 60}}
+
+        compiled = self.compile(diary_with(present))
+
+        self.assertEqual(compiled, 0)
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.CLASSIFICATO)
+        self.assertIsNone(event.compile_minutes)
+
+    def test_an_all_day_event_adds_up_the_minutes_of_each_day(self):
+        midnight = datetime(2026, 3, 10, 0, 0, tzinfo=ROME)
+        event = Event.objects.create(
+            timesheet=self.timesheet, calendar_id=CAL_A, event_id='evt-1', title='Convegno',
+            start_time=midnight, end_time=midnight + timedelta(days=2), all_day=True,
+            status=Event.Status.CLASSIFICATO, category=Event.Category.DOTTORATI)
+        present = {date(2026, 3, 11): {Event.Category.ESAMI_PROFITTO: 5 * 60}}
+
+        self.compile(diary_with(present))
+
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.COMPILATO)
+        self.assertEqual(event.compile_minutes, 8 * 60 + 3 * 60)
+
+
+DIARY_PAGE = Path(__file__).resolve().parent / 'test_pages' / 'esse3_diary.html'
+
+
+class CategoryCodesTests(SimpleTestCase):
+
+    def test_every_category_has_an_esse3_code(self):
+        self.assertEqual(sorted(CATEGORY_CODES), sorted(Event.Category.values))
+
+
+@override_settings(SELENIUM_BROWSER='firefox', SELENIUM_REMOTE_URL='')
+class Esse3PageTests(SimpleTestCase):
+    """The production functions on a saved copy of the Esse3 diary
+    (test_pages/esse3_diary.html, 01/10-14/10/2026). Nothing is ever submitted:
+    sbmDef and btnVaiData are not clicked. Skipped without a local browser.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        try:
+            cls.driver = open_driver()
+        except WebDriverException as error:
+            raise SkipTest(f'No browser for Selenium: {error.msg}')
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.driver.quit()
+        super().tearDownClass()
+
+    def setUp(self):
+        self.driver.get(DIARY_PAGE.as_uri())
+
+    def test_the_form_never_posts_to_esse3(self):
+        self.assertNotIn('esse3.unimore.it', DIARY_PAGE.read_text(encoding='utf-8'))
+
+    def test_the_period_comes_from_the_page(self):
+        self.assertEqual(page_period(self.driver), (date(2026, 10, 1), date(2026, 10, 14)))
+
+    def test_every_cell_of_the_page_is_read(self):
+        page = read_page(self.driver)
+
+        self.assertEqual(len(page), 14)
+        for day in page:
+            self.assertEqual(len(page[day]), 13)
+
+    def test_hours_already_in_the_diary_are_read_in_minutes(self):
+        page = read_page(self.driver)
+
+        self.assertEqual(page[date(2026, 10, 1)]['esami_profitto'], 120)
+        self.assertEqual(page[date(2026, 10, 2)]['preparazione_lezioni'], 300)
+        self.assertEqual(page[date(2026, 10, 2)]['ricevimento_studenti'], 180)
+        self.assertEqual(page[date(2026, 10, 6)]['ricevimento_studenti'], 90)
+        self.assertEqual(page[date(2026, 10, 1)]['master'], 0)
+
+    def test_the_total_row_is_not_counted(self):
+        page = read_page(self.driver)
+
+        self.assertEqual(sum(page[date(2026, 10, 2)].values()), 480)
+
+    def test_written_cells_are_read_back(self):
+        write_page(self.driver, {
+            date(2026, 10, 1): {'esami_profitto': 180},
+            date(2026, 10, 13): {'master': 45},
+        })
+
+        page = read_page(self.driver)
+        self.assertEqual(page[date(2026, 10, 1)]['esami_profitto'], 180)
+        self.assertEqual(page[date(2026, 10, 13)]['master'], 45)
+        self.assertEqual(page[date(2026, 10, 2)]['preparazione_lezioni'], 300)
+        self.assertEqual(page[date(2026, 10, 14)]['master'], 0)
+
+    def test_a_planned_day_ends_up_in_the_cells(self):
+        # 01/10 has 2 hours of esami di profitto: a 7-hour lesson gets the 6 left
+        lesson = SimpleNamespace(
+            category=Event.Category.PREPARAZIONE_LEZIONI,
+            start_time=datetime(2026, 10, 1, 9, 0, tzinfo=ROME))
+        present = read_page(self.driver)[date(2026, 10, 1)]
+
+        cells, written = plan_day(present, [(lesson, 7 * 60)])
+        write_page(self.driver, {date(2026, 10, 1): cells})
+
+        page = read_page(self.driver)
+        self.assertEqual(written, [(lesson, 6 * 60)])
+        self.assertEqual(page[date(2026, 10, 1)]['preparazione_lezioni'], 360)
+        self.assertEqual(sum(page[date(2026, 10, 1)].values()), 480)
+
+
+def diary_event(timesheet, event_id, start, hours, category):
+    return Event.objects.create(
+        timesheet=timesheet, calendar_id=CAL_A, event_id=event_id, title='Lezione',
+        start_time=start, end_time=start + timedelta(hours=hours),
+        status=Event.Status.CLASSIFICATO, category=category)
+
+
+def reload_page(driver):
+    # Stands in for an sbmDef that Esse3 did not take: the cells go back as they were
+    driver.get(DIARY_PAGE.as_uri())
+
+
+@override_settings(SELENIUM_BROWSER='firefox', SELENIUM_REMOTE_URL='')
+class FillDiaryTests(TestCase):
+    """fill_diary on the saved diary page (01/10-14/10/2026, editable up to
+    15/10). open_period and save_page are replaced: the file must never be
+    submitted, so saving is played by keeping or reloading the page.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        # Driver first: a SkipTest after super().setUpClass() would leave
+        # the class transaction open
+        try:
+            cls.driver = open_driver()
+        except WebDriverException as error:
+            raise SkipTest(f'No browser for Selenium: {error.msg}')
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.driver.quit()
+        super().tearDownClass()
+
+    def setUp(self):
+        self.driver.get(DIARY_PAGE.as_uri())
+        self.user, self.docente = make_docente()
+        self.timesheet = make_timesheet(self.docente)
+
+    def fill(self, save_page=None):
+        events = Event.objects.filter(status=Event.Status.CLASSIFICATO)
+        days = events_by_day(events, 8, date(2026, 9, 1), date(2026, 10, 31))
+        with mock.patch('classificationpipeline.esse3_compilation.open_period') as open_period, \
+                mock.patch('classificationpipeline.esse3_compilation.save_page',
+                           side_effect=save_page):
+            fill_diary(self.driver, days)
+        return open_period
+
+    def assertClassificato(self, event):
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.CLASSIFICATO)
+        self.assertIsNone(event.compile_minutes)
+
+    def test_a_saved_page_marks_its_events_compilato(self):
+        # 01/10 has 2 hours already, 02/10 is full
+        cut = diary_event(self.timesheet, 'evt-1', datetime(2026, 10, 1, 9, 0, tzinfo=ROME),
+                          7, Event.Category.PREPARAZIONE_LEZIONI)
+        full_day = diary_event(self.timesheet, 'evt-2', datetime(2026, 10, 2, 9, 0, tzinfo=ROME),
+                               1, Event.Category.MASTER)
+
+        self.fill()
+
+        cut.refresh_from_db()
+        self.assertEqual(cut.status, Event.Status.COMPILATO)
+        self.assertEqual(cut.compile_minutes, 6 * 60)
+        self.assertClassificato(full_day)
+        page = read_page(self.driver)
+        self.assertEqual(page[date(2026, 10, 1)]['preparazione_lezioni'], 6 * 60)
+        self.assertEqual(page[date(2026, 10, 1)]['esami_profitto'], 2 * 60)
+
+    def test_a_page_esse3_did_not_save_leaves_the_events_classificato(self):
+        event = diary_event(self.timesheet, 'evt-1', datetime(2026, 10, 7, 9, 0, tzinfo=ROME),
+                            2, Event.Category.MASTER)
+
+        self.fill(save_page=reload_page)
+
+        self.assertClassificato(event)
+
+    def test_an_unexpected_value_after_saving_stops_everything(self):
+        event = diary_event(self.timesheet, 'evt-1', datetime(2026, 10, 7, 9, 0, tzinfo=ROME),
+                            2, Event.Category.MASTER)
+
+        def save_page(driver):
+            write_page(driver, {date(2026, 10, 7): {'master': 15}})
+
+        with self.assertRaises(Esse3SaveError):
+            self.fill(save_page=save_page)
+        self.assertClassificato(event)
+
+    def test_a_page_saved_only_in_part_stops_everything(self):
+        first = diary_event(self.timesheet, 'evt-1', datetime(2026, 10, 1, 9, 0, tzinfo=ROME),
+                            1, Event.Category.MASTER)
+        second = diary_event(self.timesheet, 'evt-2', datetime(2026, 10, 7, 9, 0, tzinfo=ROME),
+                             1, Event.Category.MASTER)
+
+        def save_page(driver):
+            write_page(driver, {date(2026, 10, 7): {'master': 0}})
+
+        with self.assertRaises(Esse3SaveError):
+            self.fill(save_page=save_page)
+        self.assertClassificato(first)
+        self.assertClassificato(second)
+
+    def test_a_day_esse3_does_not_show_stops_before_writing(self):
+        # open_period does nothing, so the page stays on 01/10-14/10
+        event = diary_event(self.timesheet, 'evt-1', datetime(2026, 9, 21, 9, 0, tzinfo=ROME),
+                            2, Event.Category.MASTER)
+
+        with self.assertRaises(Esse3PeriodError):
+            self.fill()
+        self.assertClassificato(event)
+        self.assertEqual(read_page(self.driver)[date(2026, 10, 1)]['master'], 0)
+
+    def test_days_esse3_does_not_let_us_change_are_skipped(self):
+        event = diary_event(self.timesheet, 'evt-1', datetime(2026, 10, 22, 9, 0, tzinfo=ROME),
+                            2, Event.Category.MASTER)
+
+        open_period = self.fill()
+
+        open_period.assert_not_called()
+        self.assertClassificato(event)
+
+
+@override_settings(ESSE3_TEST_PAGE='', SELENIUM_END_PAUSE=0)
+class WriteToEsse3Tests(TestCase):
+
+    def setUp(self):
+        self.user, self.docente = make_docente()
+        self.timesheet = make_timesheet(self.docente)
+
+    @mock.patch('classificationpipeline.esse3_compilation.open_driver')
+    def test_the_browser_is_closed_when_something_fails(self, mock_open_driver):
+        make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+
+        with self.assertRaises(NotImplementedError):
+            write_to_esse3(self.timesheet, Event.objects.all(), RANGE_START, RANGE_END, None)
+
+        mock_open_driver.return_value.quit.assert_called_once()
+
+    @mock.patch('classificationpipeline.esse3_compilation.open_driver')
+    def test_no_browser_without_days_to_write(self, mock_open_driver):
+        write_to_esse3(self.timesheet, Event.objects.none(), RANGE_START, RANGE_END, None)
+
+        mock_open_driver.assert_not_called()
+
+
+
+@override_settings(SELENIUM_BROWSER='firefox', SELENIUM_REMOTE_URL='',
+                   ESSE3_TEST_PAGE=str(DIARY_PAGE), SELENIUM_END_PAUSE=0)
+class CompileOnTestPageTests(TestCase):
+    """The whole compilation, nothing patched, on the test page that stands in
+    for Esse3 until the login exists. On a file:// page Vai and Salva do not
+    submit, so the page keeps what was written.
+    """
+
+    def setUp(self):
+        try:
+            open_driver().quit()
+        except WebDriverException as error:
+            self.skipTest(f'No browser for Selenium: {error.msg}')
+        self.user, self.docente = make_docente()
+        self.timesheet = make_timesheet(self.docente)
+
+    def test_the_events_of_the_page_are_compiled(self):
+        cut = diary_event(self.timesheet, 'evt-1', datetime(2026, 10, 1, 9, 0, tzinfo=ROME),
+                          7, Event.Category.PREPARAZIONE_LEZIONI)
+        full_day = diary_event(self.timesheet, 'evt-2', datetime(2026, 10, 2, 9, 0, tzinfo=ROME),
+                               1, Event.Category.MASTER)
+        whole = diary_event(self.timesheet, 'evt-3', datetime(2026, 10, 14, 9, 0, tzinfo=ROME),
+                            3, Event.Category.ESAMI_LAUREA)
+        events = Event.objects.filter(status=Event.Status.CLASSIFICATO)
+
+        compiled = compile_events(self.timesheet, events, date(2026, 10, 1),
+                                  date(2026, 10, 14), None)
+
+        self.assertEqual(compiled, 2)
+        cut.refresh_from_db()
+        whole.refresh_from_db()
+        self.assertEqual(cut.compile_minutes, 6 * 60)
+        self.assertEqual(whole.compile_minutes, 3 * 60)
+        self.assertClassificato(full_day)
+
+    def assertClassificato(self, event):
+        event.refresh_from_db()
+        self.assertEqual(event.status, Event.Status.CLASSIFICATO)
+

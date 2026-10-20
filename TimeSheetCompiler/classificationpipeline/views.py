@@ -441,7 +441,8 @@ def timesheet_compile(request, timesheet_id):
     )
 
     try:
-        compiled = compile_events(timesheet, events, start, end)
+        # No credentials until the login form exists
+        compiled = compile_events(timesheet, events, start, end, None)
     except CapsExceededError:
         messages.error(request, "Alcune soglie di ore sono superate: non è stato compilato niente.")
     else:

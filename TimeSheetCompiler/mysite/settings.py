@@ -127,6 +127,17 @@ OPENAI_TIMEOUT = float(os.environ.get('OPENAI_TIMEOUT', '30'))
 LLM_CONFIDENCE_THRESHOLD = int(os.environ.get('LLM_CONFIDENCE_THRESHOLD', '70'))
 KEYWORD_SIMILARITY_THRESHOLD = float(os.environ.get('KEYWORD_SIMILARITY_THRESHOLD', '0.85'))
 
+# Browser for the Esse3 compilation. With SELENIUM_REMOTE_URL it runs in another
+# container (selenium/standalone-chrome or -firefox), otherwise on this machine.
+SELENIUM_BROWSER = os.environ.get('SELENIUM_BROWSER', 'firefox')
+SELENIUM_REMOTE_URL = os.environ.get('SELENIUM_REMOTE_URL', '')
+SELENIUM_HEADLESS = os.environ.get('SELENIUM_HEADLESS', 'True') == 'True'
+# Until the Esse3 login exists, compiling opens this saved diary page instead
+# (path relative to BASE_DIR). Empty in production.
+ESSE3_TEST_PAGE = os.environ.get('ESSE3_TEST_PAGE', '')
+# Seconds the browser stays open after compiling, to see what the bot did. 0 in production.
+SELENIUM_END_PAUSE = int(os.environ.get('SELENIUM_END_PAUSE', '0'))
+
 ROOT_URLCONF = 'mysite.urls'
 
 TEMPLATES = [
