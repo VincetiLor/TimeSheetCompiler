@@ -77,18 +77,18 @@ def plan_day(present, day_events):
         else:
             filled_cells.append((event, minutes))
 
-    cells = {}
-    written = []
+    day_cells = {}
+    minutes_per_event = []
     for event, minutes in empty_cells + filled_cells:
         if free <= 0:
             break
         minutes = min(minutes, free)
-        if event.category not in cells:
-            cells[event.category] = present.get(event.category, 0)
-        cells[event.category] += minutes
-        written.append((event, minutes))
+        if event.category not in day_cells:
+            day_cells[event.category] = present.get(event.category, 0)
+        day_cells[event.category] += minutes
+        minutes_per_event.append((event, minutes))
         free -= minutes
-    return cells, written
+    return day_cells, minutes_per_event
 
 
 def compiled_hours_by_category(events):

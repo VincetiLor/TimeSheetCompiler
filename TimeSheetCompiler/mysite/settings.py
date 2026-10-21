@@ -132,8 +132,8 @@ KEYWORD_SIMILARITY_THRESHOLD = float(os.environ.get('KEYWORD_SIMILARITY_THRESHOL
 SELENIUM_BROWSER = os.environ.get('SELENIUM_BROWSER', 'firefox')
 SELENIUM_REMOTE_URL = os.environ.get('SELENIUM_REMOTE_URL', '')
 SELENIUM_HEADLESS = os.environ.get('SELENIUM_HEADLESS', 'True') == 'True'
-# Until the Esse3 login exists, compiling opens this saved diary page instead
-# (path relative to BASE_DIR). Empty in production.
+# While the Esse3 login is commented out in open_diary, compiling opens this
+# saved diary page instead (path relative to BASE_DIR). Unused on the real Esse3.
 ESSE3_TEST_PAGE = os.environ.get('ESSE3_TEST_PAGE', '')
 # Seconds the browser stays open after compiling, to see what the bot did. 0 in production.
 SELENIUM_END_PAUSE = int(os.environ.get('SELENIUM_END_PAUSE', '0'))

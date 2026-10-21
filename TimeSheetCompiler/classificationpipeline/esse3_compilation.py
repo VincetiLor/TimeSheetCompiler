@@ -1,13 +1,18 @@
 from datetime import datetime
 from pathlib import Path
 
+import pyotp
 from django.conf import settings
+from django.views.decorators.debug import sensitive_variables
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from .hours import hhmm_to_minutes, minutes_to_hhmm
+
+ESSE3_URL = 'https://www.esse3.unimore.it/'
 
 # Seconds to wait for Esse3 to load a page after a submit
 PAGE_TIMEOUT = 30
@@ -66,10 +71,7 @@ def editable_period(driver):
 
 
 def submit(driver, button_id):
-    # Clicks a submit button and waits for the new page. A saved copy of the
-    # diary is never submitted: its form could still post to Esse3.
-    if driver.current_url.startswith('file:'):
-        return
+    # Clicks a submit button and waits for the new page
     old_page = driver.find_element(By.ID, 'DATA_MIN')
     driver.find_element(By.ID, button_id).click()
     WebDriverWait(driver, PAGE_TIMEOUT).until(EC.staleness_of(old_page))
@@ -83,16 +85,20 @@ def open_period(driver, day):
     field = driver.find_element(By.ID, 'diario_doc-inputSelData')
     field.clear()
     field.send_keys(f'{day:%d/%m/%Y}')
-    submit(driver, 'btnVaiData')
+    # Commented out on the test pages: their form still posts to Esse3
+    # submit(driver, 'btnVaiData')
 
 
 def save_page(driver):
-    submit(driver, 'sbmDef')
+    # Commented out on the test pages: their form still posts to Esse3
+    # submit(driver, 'sbmDef')
+    pass
 
 
-def read_page(driver):
-    # {day: {category: minutes}} for every cell of the page. Each cell is found
-    # through its hidden fields (date and activity code) sharing the same Row[@Num=N].
+def read_page(driver, days=None):
+    # {day: {category: minutes}} for every cell of the page, or only of days.
+    # Each cell is found through its hidden fields (date and activity code)
+    # sharing the same Row[@Num=N].
     # A code we don't know keeps the code as key: its hours still fill the day.
     categories = {}
     for category, code in CATEGORY_CODES.items():
@@ -100,10 +106,13 @@ def read_page(driver):
 
     page = {}
     for date_field in driver.find_elements(By.CSS_SELECTOR, 'input[name$="/dett_data"]'):
+        day = parse_date(date_field.get_attribute('value'))
+        # A skipped cell costs one WebDriver call instead of five
+        if days is not None and day not in days:
+            continue
         row = date_field.get_attribute('name').removesuffix('/dett_data')
         code = driver.find_element(By.NAME, row + '/tipo_att_cod').get_attribute('value')
         text = driver.find_element(By.NAME, row + '/ore').get_attribute('value')
-        day = parse_date(date_field.get_attribute('value'))
         page.setdefault(day, {})[categories.get(code, code)] = hhmm_to_minutes(text.strip())
     return page
 
@@ -128,9 +137,63 @@ def write_page(driver, cells):
             cell.send_keys(minutes_to_hhmm(minutes))
 
 
+class Esse3LoginError(Exception):
+    pass
+
+
+@sensitive_variables('credentials', 'totp')
+def login(driver, credentials):
+    # Same steps as the reference repo (Esse3Automator.py, lines 111-183).
+    # credentials: {'username', 'password', 'otp_seed'}, never saved or logged.
+    wait = WebDriverWait(driver, 10)
+    driver.get(ESSE3_URL)
+
+    # The cookie banner may not show up
+    try:
+        wait.until(EC.element_to_be_clickable((By.ID, 'c-p-bn'))).click()
+    except TimeoutException:
+        pass
+
+    wait.until(EC.element_to_be_clickable((By.ID, 'hamburger'))).click()
+    wait.until(EC.element_to_be_clickable((By.ID, 'menu_link-navbox_account_LoginInfo'))).click()
+    wait.until(EC.element_to_be_clickable((By.ID, 'gu-toolBarLogin'))).click()
+
+    login_button = wait.until(EC.element_to_be_clickable(
+        (By.XPATH, "//form//button[@type='submit' and @name='_eventId_proceed']")))
+    driver.find_element(By.ID, 'username').send_keys(credentials['username'])
+    driver.find_element(By.ID, 'password').send_keys(credentials['password'])
+    login_button.click()
+
+    try:
+        otp_field = wait.until(EC.element_to_be_clickable((By.ID, 'tokencode')))
+        totp = pyotp.TOTP(credentials['otp_seed'])
+        otp_field.send_keys(totp.now())
+        wait.until(EC.element_to_be_clickable((By.NAME, '_eventId_proceed'))).click()
+    except TimeoutException:
+        raise Esse3LoginError('No OTP field: wrong username or password')
+
+    try:
+        wait.until(EC.element_to_be_clickable((By.ID, 'btnSceltaProfilo_7'))).click()
+    except TimeoutException:
+        raise Esse3LoginError('No teacher profile to choose')
+
+
+def go_to_diary(driver):
+    # Reference repo, lines 204-224, with the tuple of line 215 fixed
+    wait = WebDriverWait(driver, 10)
+    wait.until(EC.element_to_be_clickable((By.ID, 'hamburger'))).click()
+    wait.until(EC.element_to_be_clickable((By.ID, 'menu_link-navbox_docenti_Area_Docente'))).click()
+    wait.until(EC.element_to_be_clickable(
+        (By.ID, 'menu_link-navbox_docenti_auth/docente/RegistroDocente/HomeDiario'))).click()
+    wait.until(EC.element_to_be_clickable(
+        (By.XPATH, "//input[@value='Dettaglio delle attività già inserite']"))).click()
+    wait.until(EC.presence_of_element_located((By.ID, 'diario_doc-tabellaOre')))
+
+
+@sensitive_variables('credentials')
 def open_diary(driver, credentials):
-    # Login and menu up to the diary grid: phase 4. Until then, the test page.
-    if settings.ESSE3_TEST_PAGE:
-        driver.get(Path(settings.BASE_DIR, settings.ESSE3_TEST_PAGE).as_uri())
-        return
-    raise NotImplementedError('Esse3 login is not written yet')
+    # The real Esse3 is commented out until a teacher can try the login
+    # (todo, point 22): then uncomment the two calls and drop the test page.
+    # login(driver, credentials)
+    # go_to_diary(driver)
+    driver.get(Path(settings.BASE_DIR, settings.ESSE3_TEST_PAGE).as_uri())

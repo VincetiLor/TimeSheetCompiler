@@ -11,9 +11,16 @@ from calendar import monthrange
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from hooks.models import Hook
-from .compilation_sync import CapsExceededError, compile_events
+from .compilation_sync import (
+    CapsExceededError,
+    CompilationRunningError,
+    Esse3PeriodError,
+    Esse3SaveError,
+    compile_events,
+)
+from .esse3_compilation import Esse3LoginError
 from .forms import TimesheetSettingsForm
-from .hours import check_caps
+from .hours import check_caps, minutes_to_hhmm
 from .matching import match_category
 from .models import Event, Timesheet
 from authentication.services import (
@@ -25,8 +32,10 @@ from authentication.services import (
 from django.db import transaction
 from django.db.models import Count, Q
 from django.contrib import messages
+from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
 from django.views.decorators.http import require_POST
 from googleapiclient.errors import HttpError
+from selenium.common.exceptions import WebDriverException
 from .services import LLMClassificationError, ai_classificator
 
 
@@ -426,6 +435,28 @@ def classifica_incerti_ai(request, timesheet_id):
     return redirect(events_url)
 
 
+def compile_messages(request, compiled, cut, left):
+    # left: events still classificato after the compilation, shown on the page
+    if not compiled and not left:
+        messages.error(request, "Nessun evento classificato da compilare.")
+        return
+    if compiled:
+        messages.success(request, f"Eventi compilati: {compiled}.")
+    if cut:
+        parts = []
+        for event, written, planned in cut:
+            day = timezone.localtime(event.start_time)
+            parts.append(f"{day:%d/%m} {event.get_category_display()} "
+                         f"({minutes_to_hhmm(written)} su {minutes_to_hhmm(planned)})")
+        messages.warning(request, "Ore tagliate per il limite di 8 ore al giorno: " + "; ".join(parts) + ".")
+    if left:
+        messages.warning(request, (
+            f"Eventi non scritti: {left}. Rimasti tra i classificati: "
+            "su Esse3 il loro giorno era al completo o è avvenuto un errore durante la compilazione."))
+
+
+@sensitive_post_parameters('esse3_password', 'esse3_otp_seed')
+@sensitive_variables('credentials', 'otp_seed')
 @login_required
 @require_POST
 def timesheet_compile(request, timesheet_id):
@@ -440,16 +471,43 @@ def timesheet_compile(request, timesheet_id):
         status=Event.Status.CLASSIFICATO,
     )
 
+    # Esse3 username is the Unimore id we already have. Password and OTP seed
+    # come from the form, used only for this request and never saved.
+    otp_seed = request.POST.get('esse3_otp_seed', '')
+    credentials = {
+        'username': str(request.user.docente.id_unimore),
+        'password': request.POST.get('esse3_password', ''),
+        'otp_seed': otp_seed.replace(' ', '').replace('-', '').upper(),
+    }
+
     try:
-        # No credentials until the login form exists
-        compiled = compile_events(timesheet, events, start, end, None)
+        compiled, cut = compile_events(timesheet, events, start, end, credentials)
+    except CompilationRunningError:
+        messages.error(request, "Una compilazione di questo timesheet è già in corso: aspetta che finisca.")
     except CapsExceededError:
         messages.error(request, "Alcune soglie di ore sono superate: non è stato compilato niente.")
+    except Esse3LoginError:
+        messages.error(request, "Accesso a Esse3 non riuscito: controlla password e seed OTP.")
+    except Esse3PeriodError as error:
+        messages.error(request, (
+            f"Compilazione fermata: Esse3 non ha aperto il periodo del {error.day:%d/%m/%Y}. "
+            "I giorni salvati prima sono tra i compilati, gli eventi rimasti tra i "
+            "classificati non sono stati scritti."))
+    except Esse3SaveError as error:
+        messages.error(request, (
+            f"Compilazione fermata: dopo il salvataggio il diario dal {error.first:%d/%m/%Y} "
+            f"al {error.last:%d/%m/%Y} non è quello atteso. Controlla quei giorni su Esse3: "
+            "le ore potrebbero esserci già, anche se gli eventi sono rimasti tra i classificati."))
+    except WebDriverException:
+        messages.error(request, (
+            "Compilazione interrotta: Esse3 non risponde o il browser si è chiuso. "
+            "I giorni salvati prima sono tra i compilati. Prima di ricompilare controlla "
+            "su Esse3 l'ultimo periodo: le sue ore potrebbero esserci già."))
     else:
-        if compiled:
-            messages.success(request, f"Eventi compilati: {compiled}.")
-        else:
-            messages.error(request, "Nessun evento classificato da compilare.")
+        left = events_in_range(timesheet, start, end).filter(
+            status=Event.Status.CLASSIFICATO,
+        ).count()
+        compile_messages(request, compiled, cut, left)
 
     return redirect(page_url(
         'classificationpipeline:event_compare', timesheet, start, end))

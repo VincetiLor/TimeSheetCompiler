@@ -171,8 +171,24 @@
         superata; la view ripete comunque il controllo delle soglie.
         {% endcomment %}
         {% if timesheet.is_open %}
-        <form method="post" action="{{ compile_url }}" class="{% if caps %}mt-8 border-t border-linea pt-6{% endif %}">
+        {% comment %}Al submit il bottone si spegne e un avviso copre la pagina finche' non arriva la risposta.{% endcomment %}
+        <form method="post" action="{{ compile_url }}" onsubmit="this.querySelector('button').disabled = true; document.getElementById('attesa-compila').hidden = false;" class="{% if caps %}mt-8 border-t border-linea pt-6{% endif %}">
             {% csrf_token %}
+            {% comment %}
+            Credenziali Esse3: lo username e' l'id Unimore del docente, gia' nel DB.
+            Password e seed OTP servono solo a questa compilazione, non si salvano.
+            {% endcomment %}
+            <div class="mb-4 space-y-3">
+                <label class="block text-sm font-semibold text-inchiostro">
+                    Password Esse3
+                    <input type="password" name="esse3_password" required autocomplete="current-password" class="campo mt-1 font-normal">
+                </label>
+                <label class="block text-sm font-semibold text-inchiostro">
+                    Seed OTP
+                    <input type="password" name="esse3_otp_seed" required autocomplete="off" class="campo mt-1 font-normal">
+                </label>
+                <p class="text-sm">Non vengono salvati sul server.</p>
+            </div>
             <button type="submit" {% if over_caps or not eventi_classificati %}disabled aria-describedby="nota-compila"{% endif %} onclick="return confirm('Compilare i {{ eventi_classificati|length }} eventi classificati? Non si potranno più togliere.')" class="h-11 w-full rounded-md bg-bosco px-7 font-semibold text-carta transition-colors hover:bg-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-bosco">
                 Compila il timesheet
             </button>
@@ -182,9 +198,28 @@
             <p id="nota-compila" class="mt-2 text-sm">Nessun evento classificato da compilare.</p>
             {% endif %}
         </form>
+
+        <div id="attesa-compila" hidden role="status" aria-live="polite" class="fixed inset-0 z-50 flex items-center justify-center bg-inchiostro/40 px-4">
+            <div class="max-w-md rounded-md border border-linea bg-carta px-8 py-7 text-center shadow-[0_10px_30px_-12px_rgb(23_58_41/0.35)]">
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="mx-auto size-8 animate-spin text-bosco"><path d="M12 3a9 9 0 1 0 9 9"/></svg>
+                <p class="mt-4 font-serif text-2xl text-inchiostro">Compilazione in corso</p>
+                <p class="mt-2 leading-relaxed">Le ore vengono scritte su Esse3, può durare qualche minuto. Non chiudere e non ricaricare la pagina.</p>
+            </div>
+        </div>
         {% endif %}
     </aside>
     {% endif %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{% comment %}Tornando indietro il browser puo' rimostrare la pagina con l'avviso di attesa ancora aperto: si ricarica.{% endcomment %}
+<script>
+window.addEventListener('pageshow', function (event) {
+    if (event.persisted) {
+        location.reload();
+    }
+});
+</script>
 {% endblock %}

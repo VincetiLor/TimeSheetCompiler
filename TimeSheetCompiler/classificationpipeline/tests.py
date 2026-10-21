@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 import httplib2
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connections, transaction
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -32,7 +32,7 @@ from authentication.services import GoogleCredentialsError
 from classificationpipeline.compilation_sync import (
     Esse3PeriodError, Esse3SaveError, compile_events, fill_diary, save_day, write_to_esse3)
 from classificationpipeline.esse3_compilation import (
-    CATEGORY_CODES, open_driver, page_period, read_page, write_page)
+    CATEGORY_CODES, Esse3LoginError, open_driver, page_period, read_page, write_page)
 from classificationpipeline.hours import (
     check_caps, event_hours, events_by_day, hhmm_to_minutes, hours_by_category,
     minutes_to_hhmm, plan_day)
@@ -2204,6 +2204,86 @@ class TimesheetCompileTests(TestCase):
 
         self.assertEqual(self.status(later), Event.Status.CLASSIFICATO)
 
+    def test_credentials_are_the_unimore_id_and_the_form_fields(self):
+        make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+
+        self.client.post(self.url, {'esse3_password': 'secret',
+                                    'esse3_otp_seed': 'jbsw y3dp-ehpk'})
+
+        credentials = self.mock_write.call_args.args[4]
+        self.assertEqual(credentials, {'username': '4242', 'password': 'secret',
+                                       'otp_seed': 'JBSWY3DPEHPK'})
+
+    def test_a_failed_login_compiles_nothing(self):
+        self.mock_write.side_effect = Esse3LoginError('No OTP field')
+        event = make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(self.status(event), Event.Status.CLASSIFICATO)
+        self.assertEqual(message_texts(response),
+                         ['Accesso a Esse3 non riuscito: controlla password e seed OTP.'])
+
+    def test_a_cut_event_and_a_full_day_are_reported(self):
+        self.mock_write.side_effect = diary_with({
+            MARCH_10.date(): {Event.Category.ESAMI_PROFITTO: 7 * 60},
+            date(2026, 3, 11): {Event.Category.ESAMI_PROFITTO: 8 * 60},
+        })
+        make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+        make_event(self.timesheet, 'evt-2', start=MARCH_10 + timedelta(days=1),
+                   status=Event.Status.CLASSIFICATO)
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(message_texts(response), [
+            'Eventi compilati: 1.',
+            'Ore tagliate per il limite di 8 ore al giorno: 10/03 preparazione lezioni (01:00 su 02:00).',
+            'Eventi non scritti: 1. Rimasti tra i classificati: su Esse3 il loro giorno '
+            'era al completo o è avvenuto un errore durante la compilazione.',
+        ])
+
+    def test_a_running_compilation_blocks_a_second_one(self):
+        event = make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+        other = connections.create_connection('default')
+        self.addCleanup(other.close)
+        with other.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_lock(%s)', [self.timesheet.pk])
+
+        response = self.client.post(self.url)
+
+        self.mock_write.assert_not_called()
+        self.assertEqual(self.status(event), Event.Status.CLASSIFICATO)
+        self.assertEqual(message_texts(response),
+                         ['Una compilazione di questo timesheet è già in corso: aspetta che finisca.'])
+
+    def test_the_lock_is_released_after_a_compilation(self):
+        make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+        self.client.post(self.url)
+        other = connections.create_connection('default')
+        self.addCleanup(other.close)
+
+        with other.cursor() as cursor:
+            cursor.execute('SELECT pg_try_advisory_lock(%s)', [self.timesheet.pk])
+            self.assertTrue(cursor.fetchone()[0])
+
+    def test_a_failed_save_tells_which_days_to_check(self):
+        self.mock_write.side_effect = Esse3SaveError(date(2026, 3, 1), date(2026, 3, 14))
+        make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+
+        response = self.client.post(self.url)
+
+        [text] = message_texts(response)
+        self.assertIn('dal 01/03/2026 al 14/03/2026', text)
+
+    def test_a_closed_browser_is_reported(self):
+        self.mock_write.side_effect = WebDriverException('browser closed')
+        make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+
+        response = self.client.post(self.url)
+
+        [text] = message_texts(response)
+        self.assertIn('Compilazione interrotta', text)
+
     def test_get_is_rejected(self):
         response = self.client.get(self.url)
 
@@ -2256,7 +2336,8 @@ class CompileEventsTests(TestCase):
         with mock.patch('classificationpipeline.compilation_sync.write_to_esse3',
                         side_effect=write):
             events = Event.objects.filter(status=Event.Status.CLASSIFICATO)
-            return compile_events(self.timesheet, events, RANGE_START, RANGE_END, None)
+            compiled, cut = compile_events(self.timesheet, events, RANGE_START, RANGE_END, None)
+            return compiled
 
     def test_days_saved_before_a_crash_stay_compilato(self):
         first = make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
@@ -2359,6 +2440,14 @@ class Esse3PageTests(SimpleTestCase):
         self.assertEqual(len(page), 14)
         for day in page:
             self.assertEqual(len(page[day]), 13)
+
+    def test_only_the_asked_days_are_read_with_every_cell(self):
+        page = read_page(self.driver, [date(2026, 10, 2), date(2026, 10, 6)])
+
+        self.assertEqual(sorted(page), [date(2026, 10, 2), date(2026, 10, 6)])
+        self.assertEqual(len(page[date(2026, 10, 2)]), 13)
+        self.assertEqual(sum(page[date(2026, 10, 2)].values()), 480)
+        self.assertEqual(page[date(2026, 10, 6)]['ricevimento_studenti'], 90)
 
     def test_hours_already_in_the_diary_are_read_in_minutes(self):
         page = read_page(self.driver)
@@ -2525,7 +2614,7 @@ class FillDiaryTests(TestCase):
         self.assertClassificato(event)
 
 
-@override_settings(ESSE3_TEST_PAGE='', SELENIUM_END_PAUSE=0)
+@override_settings(SELENIUM_END_PAUSE=0)
 class WriteToEsse3Tests(TestCase):
 
     def setUp(self):
@@ -2535,8 +2624,9 @@ class WriteToEsse3Tests(TestCase):
     @mock.patch('classificationpipeline.esse3_compilation.open_driver')
     def test_the_browser_is_closed_when_something_fails(self, mock_open_driver):
         make_event(self.timesheet, 'evt-1', status=Event.Status.CLASSIFICATO)
+        mock_open_driver.return_value.get.side_effect = WebDriverException('page not loaded')
 
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaises(WebDriverException):
             write_to_esse3(self.timesheet, Event.objects.all(), RANGE_START, RANGE_END, None)
 
         mock_open_driver.return_value.quit.assert_called_once()
@@ -2553,7 +2643,7 @@ class WriteToEsse3Tests(TestCase):
                    ESSE3_TEST_PAGE=str(DIARY_PAGE), SELENIUM_END_PAUSE=0)
 class CompileOnTestPageTests(TestCase):
     """The whole compilation, nothing patched, on the test page that stands in
-    for Esse3 until the login exists. On a file:// page Vai and Salva do not
+    for Esse3 while the login is commented out. On a file:// page Vai and Salva do not
     submit, so the page keeps what was written.
     """
 
@@ -2574,10 +2664,11 @@ class CompileOnTestPageTests(TestCase):
                             3, Event.Category.ESAMI_LAUREA)
         events = Event.objects.filter(status=Event.Status.CLASSIFICATO)
 
-        compiled = compile_events(self.timesheet, events, date(2026, 10, 1),
-                                  date(2026, 10, 14), None)
+        compiled, cut_events = compile_events(self.timesheet, events, date(2026, 10, 1),
+                                              date(2026, 10, 14), None)
 
         self.assertEqual(compiled, 2)
+        self.assertEqual(cut_events, [(cut, 6 * 60, 7 * 60)])
         cut.refresh_from_db()
         whole.refresh_from_db()
         self.assertEqual(cut.compile_minutes, 6 * 60)
