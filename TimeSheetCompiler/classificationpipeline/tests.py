@@ -34,8 +34,8 @@ from classificationpipeline.compilation_sync import (
 from classificationpipeline.esse3_compilation import (
     CATEGORY_CODES, Esse3LoginError, open_driver, page_period, read_page, write_page)
 from classificationpipeline.hours import (
-    check_caps, event_hours, events_by_day, hhmm_to_minutes, hours_by_category,
-    minutes_to_hhmm, plan_day)
+    category_priority, check_caps, complete_priority, event_hours, events_by_day,
+    hhmm_to_minutes, hours_by_category, minutes_to_hhmm, plan_day)
 from classificationpipeline.matching import match_category, title_chunks
 from classificationpipeline.models import Event, Timesheet, TimesheetHourCap
 from classificationpipeline.services import LLMClassificationError, ai_classificator
@@ -381,6 +381,13 @@ class TimesheetSettingsTests(TestCase):
             caps[cap.category] = cap.max_hours
         return caps
 
+    def post(self, data, url=None):
+        # The page always sends the priority: a test adds it unless it sets one
+        data = dict(data)
+        if 'category_priority' not in data:
+            data['category_priority'] = ','.join(Event.Category.values)
+        return self.client.post(url or self.url, data)
+
     def test_the_page_shows_the_saved_values(self):
         TimesheetHourCap.objects.create(
             timesheet=self.timesheet, category=Event.Category.ESAMI_LAUREA, max_hours=30)
@@ -394,7 +401,7 @@ class TimesheetSettingsTests(TestCase):
         self.assertIsNone(form['cap_master'].value())
 
     def test_saving_stores_the_hours_and_one_cap_per_filled_category(self):
-        response = self.client.post(self.url, {
+        response = self.post({
             'all_day_hours': '6',
             'total_hours_cap': '350',
             'cap_esami_laurea': '30',
@@ -414,7 +421,7 @@ class TimesheetSettingsTests(TestCase):
         self.timesheet.total_hours_cap = 350
         self.timesheet.save()
 
-        self.client.post(self.url, {'all_day_hours': '8', 'total_hours_cap': '', 'cap_esami_laurea': ''})
+        self.post({'all_day_hours': '8', 'total_hours_cap': '', 'cap_esami_laurea': ''})
 
         self.timesheet.refresh_from_db()
         self.assertIsNone(self.timesheet.total_hours_cap)
@@ -424,12 +431,12 @@ class TimesheetSettingsTests(TestCase):
         TimesheetHourCap.objects.create(
             timesheet=self.timesheet, category=Event.Category.ESAMI_LAUREA, max_hours=30)
 
-        self.client.post(self.url, {'all_day_hours': '8', 'cap_esami_laurea': '45'})
+        self.post({'all_day_hours': '8', 'cap_esami_laurea': '45'})
 
         self.assertEqual(self.caps(), {'esami_laurea': 45})
 
     def test_invalid_values_save_nothing(self):
-        response = self.client.post(self.url, {
+        response = self.post({
             'all_day_hours': '25',
             'cap_esami_laurea': '-1',
             'cap_master': '10',
@@ -445,7 +452,7 @@ class TimesheetSettingsTests(TestCase):
         self.timesheet.all_day_hours = 6
         self.timesheet.save()
 
-        response = self.client.post(self.url, {'all_day_hours': '9'})
+        response = self.post({'all_day_hours': '9'})
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('all_day_hours', response.context['form'].errors)
@@ -456,16 +463,50 @@ class TimesheetSettingsTests(TestCase):
         events_page = page('event_compare', self.timesheet)
         url = f"{self.url}?{urlencode({'next': events_page})}"
 
-        response = self.client.post(url, {'all_day_hours': '8'})
+        response = self.post({'all_day_hours': '8'}, url)
 
         self.assertEqual(response.url, events_page)
 
     def test_a_next_to_another_site_is_ignored(self):
         url = f"{self.url}?{urlencode({'next': 'https://esempio.com/'})}"
 
-        response = self.client.post(url, {'all_day_hours': '8'})
+        response = self.post({'all_day_hours': '8'}, url)
 
         self.assertEqual(response.url, '/timesheets/')
+
+    def test_the_cards_follow_the_saved_priority(self):
+        self.timesheet.category_priority = ['pnrr', 'master']
+        self.timesheet.save()
+
+        response = self.client.get(self.url)
+
+        categories = []
+        for category, field in response.context['form'].cap_fields():
+            categories.append(category)
+        self.assertEqual(categories[:3], ['pnrr', 'master', 'assistenza_laureandi'])
+        self.assertEqual(len(categories), 13)
+        self.assertContains(response, 'data-category="pnrr"')
+
+    def test_saving_stores_the_priority_also_for_categories_without_a_cap(self):
+        priority = list(reversed(Event.Category.values))
+
+        self.post({'all_day_hours': '8', 'cap_master': '10', 'category_priority': ','.join(priority)})
+
+        self.timesheet.refresh_from_db()
+        self.assertEqual(self.timesheet.category_priority, priority)
+        self.assertEqual(self.caps(), {'master': 10})
+
+    def test_a_priority_without_every_category_once_saves_nothing(self):
+        codes = list(Event.Category.values)
+        codes[0] = codes[1]
+
+        response = self.post({'all_day_hours': '6', 'category_priority': ','.join(codes)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('category_priority', response.context['form'].errors)
+        self.timesheet.refresh_from_db()
+        self.assertEqual(self.timesheet.all_day_hours, 8)
+        self.assertEqual(self.timesheet.category_priority, [])
 
     def test_another_docente_timesheet_is_not_found(self):
         _, other = make_docente('altro', 9999)
@@ -1851,31 +1892,47 @@ class PlanDayTests(SimpleTestCase):
         start = datetime(2026, 3, 10, hour, 0, tzinfo=ROME)
         return Event(start_time=start, end_time=start, category=category)
 
+    def _priority(self, *first):
+        return complete_priority(first)
+
     def test_an_empty_day_takes_every_event_whole(self):
         exam = self._event(9, Event.Category.ESAMI_PROFITTO)
         office_hours = self._event(11, Event.Category.RICEVIMENTO_STUDENTI)
 
-        cells, written = plan_day({}, [(exam, 120), (office_hours, 90)])
+        cells, written = plan_day({}, [(exam, 120), (office_hours, 90)], Event.Category.values)
 
         self.assertEqual(cells, {'esami_profitto': 120, 'ricevimento_studenti': 90})
         self.assertEqual(written, [(exam, 120), (office_hours, 90)])
 
-    def test_empty_cells_first_then_the_last_event_that_fits_is_cut(self):
-        # 6 hours already in the diary, 2 free: B whole, C cut to 30, A left out
+    def test_the_higher_category_goes_first_even_if_it_starts_later(self):
+        # 6 free hours: the master event comes first, the lesson is cut
+        lesson = self._event(9, Event.Category.PREPARAZIONE_LEZIONI)
+        master = self._event(15, Event.Category.MASTER)
+        priority = self._priority('master', 'preparazione_lezioni')
+
+        cells, written = plan_day({'pnrr': 120}, [(lesson, 300), (master, 120)], priority)
+
+        self.assertEqual(written, [(master, 120), (lesson, 240)])
+        self.assertEqual(cells, {'master': 120, 'preparazione_lezioni': 240})
+
+    def test_a_filled_cell_is_not_put_after_the_empty_ones(self):
+        # 2 free hours. Esami di profitto already has hours but comes first:
+        # A whole, B cut to 60, C left out
         present = {'esami_profitto': 120, 'preparazione_lezioni': 240}
         a = self._event(9, Event.Category.ESAMI_PROFITTO)
         b = self._event(11, Event.Category.RICEVIMENTO_STUDENTI)
         c = self._event(15, Event.Category.RICEVIMENTO_STUDENTI)
+        priority = self._priority('esami_profitto', 'ricevimento_studenti')
 
-        cells, written = plan_day(present, [(a, 60), (b, 90), (c, 60)])
+        cells, written = plan_day(present, [(a, 60), (b, 90), (c, 60)], priority)
 
-        self.assertEqual(cells, {'ricevimento_studenti': 120})
-        self.assertEqual(written, [(b, 90), (c, 30)])
+        self.assertEqual(cells, {'esami_profitto': 180, 'ricevimento_studenti': 60})
+        self.assertEqual(written, [(a, 60), (b, 60)])
 
     def test_a_filled_cell_gets_the_sum(self):
         exam = self._event(9, Event.Category.ESAMI_PROFITTO)
 
-        cells, written = plan_day({'esami_profitto': 120}, [(exam, 60)])
+        cells, written = plan_day({'esami_profitto': 120}, [(exam, 60)], Event.Category.values)
 
         self.assertEqual(cells, {'esami_profitto': 180})
         self.assertEqual(written, [(exam, 60)])
@@ -1883,27 +1940,27 @@ class PlanDayTests(SimpleTestCase):
     def test_a_full_day_is_skipped(self):
         exam = self._event(9, Event.Category.ESAMI_PROFITTO)
 
-        self.assertEqual(plan_day({'master': 480}, [(exam, 60)]), ({}, []))
+        self.assertEqual(plan_day({'master': 480}, [(exam, 60)], Event.Category.values), ({}, []))
 
     def test_a_day_over_8_hours_by_hand_is_skipped(self):
         exam = self._event(9, Event.Category.ESAMI_PROFITTO)
 
-        self.assertEqual(plan_day({'master': 540}, [(exam, 60)]), ({}, []))
+        self.assertEqual(plan_day({'master': 540}, [(exam, 60)], Event.Category.values), ({}, []))
 
-    def test_inside_a_group_the_earlier_event_goes_first(self):
+    def test_inside_a_category_the_earlier_event_goes_first(self):
         late = self._event(15, Event.Category.MASTER)
-        early = self._event(9, Event.Category.DOTTORATI)
+        early = self._event(9, Event.Category.MASTER)
 
-        cells, written = plan_day({}, [(late, 300), (early, 300)])
+        cells, written = plan_day({}, [(late, 300), (early, 300)], Event.Category.values)
 
         self.assertEqual(written, [(early, 300), (late, 180)])
-        self.assertEqual(cells, {'dottorati': 300, 'master': 180})
+        self.assertEqual(cells, {'master': 480})
 
     def test_two_events_of_an_empty_cell_add_up_in_that_cell(self):
         first = self._event(9, Event.Category.MASTER)
         second = self._event(11, Event.Category.MASTER)
 
-        cells, written = plan_day({}, [(first, 60), (second, 30)])
+        cells, written = plan_day({}, [(first, 60), (second, 30)], Event.Category.values)
 
         self.assertEqual(cells, {'master': 90})
         self.assertEqual(written, [(first, 60), (second, 30)])
@@ -1911,11 +1968,31 @@ class PlanDayTests(SimpleTestCase):
     def test_an_exact_fit_leaves_the_next_event_out(self):
         first = self._event(9, Event.Category.MASTER)
         second = self._event(11, Event.Category.DOTTORATI)
+        priority = self._priority('master', 'dottorati')
 
-        cells, written = plan_day({'pnrr': 360}, [(first, 120), (second, 60)])
+        cells, written = plan_day({'pnrr': 360}, [(first, 120), (second, 60)], priority)
 
         self.assertEqual(written, [(first, 120)])
         self.assertEqual(cells, {'master': 120})
+
+
+class CategoryPriorityTests(SimpleTestCase):
+    """The saved list is completed so that plan_day always gets every category."""
+
+    def test_an_empty_list_gives_the_category_order(self):
+        self.assertEqual(category_priority(Timesheet()), Event.Category.values)
+
+    def test_missing_categories_go_after_the_saved_ones(self):
+        priority = complete_priority(['pnrr', 'master'])
+
+        self.assertEqual(priority[:3], ['pnrr', 'master', 'assistenza_laureandi'])
+        self.assertEqual(len(priority), 13)
+
+    def test_unknown_and_repeated_codes_are_dropped(self):
+        priority = complete_priority(['vacanza', 'master', 'master'])
+
+        self.assertEqual(priority[0], 'master')
+        self.assertEqual(sorted(priority), sorted(Event.Category.values))
 
 
 class HhmmConversionTests(SimpleTestCase):
@@ -2128,7 +2205,7 @@ def write_on_empty_diary(timesheet, events, start, end, credentials):
     # Stands in for the bot: every diary day is empty, one save per day
     days = events_by_day(events, timesheet.all_day_hours, start, end)
     for day in sorted(days):
-        cells, written = plan_day({}, days[day])
+        cells, written = plan_day({}, days[day], category_priority(timesheet))
         save_day(written)
 
 
@@ -2317,7 +2394,7 @@ def diary_with(present, crash_after_days=None):
         for day in sorted(days):
             if saved == crash_after_days:
                 raise ConnectionError('browser closed')
-            cells, written = plan_day(present.get(day, {}), days[day])
+            cells, written = plan_day(present.get(day, {}), days[day], category_priority(timesheet))
             save_day(written)
             saved += 1
     return write
@@ -2482,7 +2559,7 @@ class Esse3PageTests(SimpleTestCase):
             start_time=datetime(2026, 10, 1, 9, 0, tzinfo=ROME))
         present = read_page(self.driver)[date(2026, 10, 1)]
 
-        cells, written = plan_day(present, [(lesson, 7 * 60)])
+        cells, written = plan_day(present, [(lesson, 7 * 60)], Event.Category.values)
         write_page(self.driver, {date(2026, 10, 1): cells})
 
         page = read_page(self.driver)
@@ -2536,7 +2613,7 @@ class FillDiaryTests(TestCase):
         with mock.patch('classificationpipeline.esse3_compilation.open_period') as open_period, \
                 mock.patch('classificationpipeline.esse3_compilation.save_page',
                            side_effect=save_page):
-            fill_diary(self.driver, days)
+            fill_diary(self.driver, days, Event.Category.values)
         return open_period
 
     def assertClassificato(self, event):

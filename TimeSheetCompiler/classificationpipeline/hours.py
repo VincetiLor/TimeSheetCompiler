@@ -64,22 +64,37 @@ def event_start(pair):
     return pair[0].start_time
 
 
-def plan_day(present, day_events):
+def complete_priority(codes):
+    # The known categories in the given order, then the missing ones
+    priority = []
+    for code in codes:
+        if code in Event.Category.values and code not in priority:
+            priority.append(code)
+    for code in Event.Category.values:
+        if code not in priority:
+            priority.append(code)
+    return priority
+
+
+def category_priority(timesheet):
+    return complete_priority(timesheet.category_priority)
+
+
+def plan_day(present, day_events, priority):
     # present: {category: minutes} already in the diary that day.
+    # priority: every category code, highest first.
     # Returns ({category: minutes to write in the cell}, [(event, minutes written), ...])
     free = DAY_MINUTES - sum(present.values())
 
-    empty_cells = []
-    filled_cells = []
-    for event, minutes in sorted(day_events, key=event_start):
-        if present.get(event.category, 0) == 0:
-            empty_cells.append((event, minutes))
-        else:
-            filled_cells.append((event, minutes))
+    ordered = []
+    for category in priority:
+        for event, minutes in sorted(day_events, key=event_start):
+            if event.category == category:
+                ordered.append((event, minutes))
 
     day_cells = {}
     minutes_per_event = []
-    for event, minutes in empty_cells + filled_cells:
+    for event, minutes in ordered:
         if free <= 0:
             break
         minutes = min(minutes, free)

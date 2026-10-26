@@ -35,18 +35,28 @@
         </section>
 
         <section aria-labelledby="soglie" class="mt-10">
-            <h2 id="soglie" class="font-serif text-2xl text-inchiostro">Soglie per categoria</h2>
-            <div class="mt-4 divide-y divide-linea rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
-                {% for field in form.cap_fields %}
-                <div class="grid gap-2 px-5 py-3 sm:grid-cols-[minmax(0,3fr)_minmax(0,1fr)] sm:items-center sm:gap-4">
-                    <label for="{{ field.id_for_label }}" class="text-inchiostro">{{ field.label }}</label>
+            <h2 id="soglie" class="font-serif text-2xl text-inchiostro">Soglie e priorità per categoria</h2>
+            <p id="priorita-aiuto" class="mt-2 max-w-xl leading-relaxed">
+                L'ordine delle categorie è la loro priorità. Se in un giorno le ore superano le 8,
+                entrano prima gli eventi delle categorie più in alto. Trascina la maniglia
+                <span aria-hidden="true">≡</span> per cambiare l'ordine, oppure selezionala e usa le frecce su e giù.
+            </p>
+            {{ form.category_priority }}
+            {{ form.category_priority.errors }}
+            <ol id="lista-priorita" class="mt-4 divide-y divide-linea rounded-lg border border-linea bg-superficie shadow-[0_1px_2px_rgb(23_58_41/0.06),0_10px_30px_-12px_rgb(23_58_41/0.22)]">
+                {% for category, field in form.cap_fields %}
+                <li data-category="{{ category }}" class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-5 py-3 sm:grid-cols-[minmax(0,3fr)_minmax(0,1fr)_auto] sm:gap-x-4">
+                    <label for="{{ field.id_for_label }}" class="col-span-2 text-inchiostro sm:col-span-1">{{ field.label }}</label>
                     <div>
                         {{ field }}
                         {{ field.errors }}
                     </div>
-                </div>
+                    <button type="button" aria-label="Sposta {{ field.label }}" aria-describedby="priorita-aiuto" class="maniglia flex size-8 cursor-grab touch-none items-center justify-center rounded-md text-grigio hover:bg-fondo hover:text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco active:cursor-grabbing">
+                        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" class="size-5"><path d="M4 6h12M4 10h12M4 14h12"/></svg>
+                    </button>
+                </li>
                 {% endfor %}
-            </div>
+            </ol>
         </section>
 
         <div class="mt-6 flex">
@@ -56,4 +66,79 @@
         </div>
     </form>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const list = document.getElementById('lista-priorita');
+    const priority = document.getElementById('{{ form.category_priority.id_for_label }}');
+    let dragged = null;
+
+    function saveOrder() {
+        const codes = [];
+        for (const row of list.children) {
+            codes.push(row.dataset.category);
+        }
+        priority.value = codes.join(',');
+    }
+
+    list.addEventListener('pointerdown', function (event) {
+        const handle = event.target.closest('.maniglia');
+        if (!handle) {
+            return;
+        }
+        event.preventDefault();
+        dragged = handle.closest('li');
+        dragged.classList.add('bg-bosco-chiaro');
+    });
+
+    // On document: moving the row in the page loses the pointer capture.
+    // The dragged row goes before the row under the pointer in its top half, after it in the bottom half.
+    document.addEventListener('pointermove', function (event) {
+        if (!dragged) {
+            return;
+        }
+        for (const row of list.children) {
+            const box = row.getBoundingClientRect();
+            if (row === dragged || event.clientY < box.top || event.clientY > box.bottom) {
+                continue;
+            }
+            if (event.clientY < box.top + box.height / 2) {
+                row.before(dragged);
+            } else {
+                row.after(dragged);
+            }
+            break;
+        }
+    });
+
+    function endDrag() {
+        if (!dragged) {
+            return;
+        }
+        dragged.classList.remove('bg-bosco-chiaro');
+        dragged = null;
+        saveOrder();
+    }
+    document.addEventListener('pointerup', endDrag);
+    document.addEventListener('pointercancel', endDrag);
+
+    list.addEventListener('keydown', function (event) {
+        const handle = event.target.closest('.maniglia');
+        if (!handle) {
+            return;
+        }
+        const row = handle.closest('li');
+        if (event.key === 'ArrowUp' && row.previousElementSibling) {
+            row.previousElementSibling.before(row);
+        } else if (event.key === 'ArrowDown' && row.nextElementSibling) {
+            row.nextElementSibling.after(row);
+        } else {
+            return;
+        }
+        event.preventDefault();
+        handle.focus();
+        saveOrder();
+    });
+</script>
 {% endblock %}

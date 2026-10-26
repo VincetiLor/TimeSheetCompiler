@@ -143,7 +143,6 @@ class Esse3LoginError(Exception):
 
 @sensitive_variables('credentials', 'totp')
 def login(driver, credentials):
-    # Same steps as the reference repo (Esse3Automator.py, lines 111-183).
     # credentials: {'username', 'password', 'otp_seed'}, never saved or logged.
     wait = WebDriverWait(driver, 10)
     driver.get(ESSE3_URL)

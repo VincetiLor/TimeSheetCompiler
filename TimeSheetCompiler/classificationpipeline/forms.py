@@ -1,5 +1,6 @@
 from django import forms
 
+from .hours import category_priority, complete_priority
 from .models import Event, TimesheetHourCap
 
 
@@ -13,6 +14,8 @@ class TimesheetSettingsForm(forms.Form):
     total_hours_cap = forms.IntegerField(
         min_value=0, required=False,
         widget=forms.NumberInput(attrs={'class': 'campo'}))
+    # Category codes separated by commas, highest priority first
+    category_priority = forms.CharField(widget=forms.HiddenInput)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -26,22 +29,32 @@ class TimesheetSettingsForm(forms.Form):
         initial = {
             'all_day_hours': timesheet.all_day_hours,
             'total_hours_cap': timesheet.total_hours_cap,
+            'category_priority': ','.join(category_priority(timesheet)),
         }
         for cap in timesheet.hour_caps.all():
             initial['cap_' + cap.category] = cap.max_hours
         return initial
 
+    def clean_category_priority(self):
+        codes = self.cleaned_data['category_priority'].split(',')
+        if sorted(codes) != sorted(Event.Category.values):
+            raise forms.ValidationError("Ordine delle categorie non valido.")
+        return codes
+
     def cap_fields(self):
+        # [(category, field), ...] in priority order, also on a form with errors
+        value = self['category_priority'].value() or ''
         fields = []
-        for category in Event.Category.values:
-            fields.append(self['cap_' + category])
+        for category in complete_priority(value.split(',')):
+            fields.append((category, self['cap_' + category]))
         return fields
 
     def save(self, timesheet):
         data = self.cleaned_data
         timesheet.all_day_hours = data['all_day_hours']
         timesheet.total_hours_cap = data['total_hours_cap']
-        timesheet.save(update_fields=['all_day_hours', 'total_hours_cap'])
+        timesheet.category_priority = data['category_priority']
+        timesheet.save(update_fields=['all_day_hours', 'total_hours_cap', 'category_priority'])
 
         for category in Event.Category.values:
             max_hours = data['cap_' + category]

@@ -1,3 +1,4 @@
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.db.models import F, Q
 
@@ -19,6 +20,8 @@ class Timesheet(models.Model):
     all_day_hours = models.PositiveSmallIntegerField(default=8)
     # Empty means no cap on the total
     total_hours_cap = models.PositiveIntegerField(null=True, blank=True)
+    # Category codes, highest priority first. Empty means the Event.Category order
+    category_priority = ArrayField(models.CharField(max_length=32), default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

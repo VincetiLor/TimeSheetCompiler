@@ -6,7 +6,7 @@ from django.views.decorators.debug import sensitive_variables
 from selenium.common.exceptions import WebDriverException
 
 from . import esse3_compilation as esse3
-from .hours import check_caps, events_by_day, plan_day
+from .hours import category_priority, check_caps, events_by_day, plan_day
 from .models import Event
 
 
@@ -84,7 +84,7 @@ def check_page(driver, first, last, present, cells_to_compile, planned_compilati
         save_day(planned_compilation[day])
 
 
-def fill_diary(driver, days_to_compile):
+def fill_diary(driver, days_to_compile, priority):
     # days_to_compile: {day: [(event, minutes), ...]}, driver already on the diary.
     # Each Esse3 page holds 14 days and is saved with a single sbmDef.
     min_day, max_day = esse3.editable_period(driver)
@@ -111,7 +111,7 @@ def fill_diary(driver, days_to_compile):
         cells_to_compile = {}
         planned_compilation = {}
         for day in page_days:
-            day_cells, minutes_per_event = plan_day(present[day], days_to_compile[day])
+            day_cells, minutes_per_event = plan_day(present[day], days_to_compile[day], priority)
             if minutes_per_event:
                 cells_to_compile[day] = day_cells
                 planned_compilation[day] = minutes_per_event
@@ -132,7 +132,7 @@ def write_to_esse3(timesheet, events, start, end, credentials):
     driver = esse3.open_driver()
     try:
         esse3.open_diary(driver, credentials)
-        fill_diary(driver, days_to_compile)
+        fill_diary(driver, days_to_compile, category_priority(timesheet))
     finally:
         # Development only: time to look at the browser before it closes
         time.sleep(settings.SELENIUM_END_PAUSE)
