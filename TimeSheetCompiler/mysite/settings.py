@@ -34,10 +34,12 @@ SECRET_KEY = os.environ['DJANGO_SECRET_KEY']
 DEBUG = os.environ.get('DJANGO_DEBUG') == 'True'
 
 ALLOWED_HOSTS = []
+CSRF_TRUSTED_ORIGINS = []
 for host in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(','):
     host = host.strip()
     if host:
         ALLOWED_HOSTS.append(host)
+        CSRF_TRUSTED_ORIGINS.append(f'https://{host}')
 
 
 # Application definition
@@ -68,6 +70,10 @@ SITE_ID = 1
 
 SOCIALACCOUNT_AUTO_SIGNUP = True
 
+# Gli utenti nascono solo dal middleware Shibboleth
+ACCOUNT_ADAPTER = 'authentication.adapters.NoSignupAccountAdapter'
+SOCIALACCOUNT_ADAPTER = 'authentication.adapters.NoSignupSocialAccountAdapter'
+
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
     'allauth.account.auth_backends.AuthenticationBackend',
@@ -92,13 +98,14 @@ MIDDLEWARE = [
 ]
 
 
-# Shibboleth pre-auth: il container SP inietta gli attributi come header prima
-# che la richiesta arrivi a Django. I nomi si cambiano qui, non nel middleware.
+# Shibboleth pre-auth: su services-host Traefik (middleware shib-auth@file)
+# passa gli attributi come header X-Shib-* prima che la richiesta arrivi a
+# Django. I nomi si cambiano qui, non nel middleware.
 SHIBBOLETH_HEADER_MAP = {
-    'nome': 'HTTP_GIVENNAME',
-    'cognome': 'HTTP_SN',
-    'id_unimore': 'HTTP_UID',
-    'affiliation': 'HTTP_AFFILIATION',
+    'nome': 'HTTP_X_SHIB_GIVENNAME',
+    'cognome': 'HTTP_X_SHIB_SN',
+    'id_unimore': 'HTTP_X_SHIB_UID',
+    'affiliation': 'HTTP_X_SHIB_AFFILIATION',
 }
 
 # Chi puo' entrare: l'header affiliation e' una lista separata da ';'
@@ -115,12 +122,16 @@ SHIBBOLETH_UID_IN_DEROGA = [
 # fire in production even if the env var is left set by mistake.
 SHIBBOLETH_DEV_MODE = DEBUG and os.environ.get('SHIBBOLETH_DEV_MODE') == 'True'
 SHIBBOLETH_DEV_FAKE_HEADERS = {
-    'HTTP_GIVENNAME': os.environ.get('SHIBBOLETH_DEV_NOME', 'Mario'),
-    'HTTP_SN': os.environ.get('SHIBBOLETH_DEV_COGNOME', 'Rossi'),
-    'HTTP_UID': os.environ.get('SHIBBOLETH_DEV_ID', '1'),
-    'HTTP_AFFILIATION': os.environ.get(
+    'HTTP_X_SHIB_GIVENNAME': os.environ.get('SHIBBOLETH_DEV_NOME', 'Mario'),
+    'HTTP_X_SHIB_SN': os.environ.get('SHIBBOLETH_DEV_COGNOME', 'Rossi'),
+    'HTTP_X_SHIB_UID': os.environ.get('SHIBBOLETH_DEV_ID', '1'),
+    'HTTP_X_SHIB_AFFILIATION': os.environ.get(
         'SHIBBOLETH_DEV_AFFILIATION', 'member@unimore.it;staff@unimore.it'),
 }
+
+SHIBBOLETH_LOGOUT_URL = 'https://services-host.ing.unimore.it/Shibboleth.sso/Logout'
+if SHIBBOLETH_DEV_MODE:
+    SHIBBOLETH_LOGOUT_URL = '/index/'
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')
@@ -169,7 +180,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB_NAME', 'timesheet'),
         'USER': os.environ.get('DB_USER', 'timesheet'),
-        'PASSWORD': os.environ.get('DB_PASSWORD'),
+        'PASSWORD': os.environ['DB_PASSWORD'],
         'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
         'PORT': os.environ.get('DB_PORT', '5432'),
     }
@@ -240,3 +251,34 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 
 SOCIALACCOUNT_STORE_TOKENS = True
+
+# Solo in produzione: Traefik termina l'HTTPS e parla con l'app in HTTP.
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https'
+
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
+    STORAGES = {
+        'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+        'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
+    }
+
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'plain': {'format': '{asctime} {levelname} {name}: {message}', 'style': '{'},
+        },
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'stream': 'ext://sys.stdout',
+                'formatter': 'plain',
+            },
+        },
+        'root': {'handlers': ['console'], 'level': 'INFO'},
+        # A INFO scrive gli URL delle chiamate, con l'indirizzo del calendario
+        'loggers': {'googleapiclient': {'level': 'WARNING'}},
+    }

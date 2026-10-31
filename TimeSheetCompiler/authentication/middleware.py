@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib.auth import login as django_login
+from django.contrib.auth import logout as django_logout
 from django.contrib.auth.models import User
 from django.shortcuts import render
 
@@ -12,10 +13,13 @@ class ShibbolethAuthMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if request.user.is_authenticated:
-            return self.get_response(request)
-
         headers = self._read_headers(request)
+
+        if request.user.is_authenticated:
+            if not headers or self._is_same_person(request.user, headers):
+                return self.get_response(request)
+            django_logout(request)
+
         if headers:
             if not self._is_allowed(headers):
                 return render(
@@ -41,6 +45,13 @@ class ShibbolethAuthMiddleware:
         if not all(values.values()):
             return None
         return values
+
+    def _is_same_person(self, user, headers):
+        docente = Docente.objects.filter(user=user).first()
+        if docente is None:
+            # In dev the fake headers would kick out the admin superuser
+            return settings.SHIBBOLETH_DEV_MODE
+        return str(docente.id_unimore) == headers['id_unimore']
 
     def _is_allowed(self, headers):
         if headers['id_unimore'] in settings.SHIBBOLETH_UID_IN_DEROGA:

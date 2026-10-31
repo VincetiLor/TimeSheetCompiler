@@ -8,9 +8,25 @@
 @source "../*/templates/**/*.html";
 @source "../*/static/**/*.js";
 
+/* Font serviti da noi (static/fonts): niente richieste a Google dai browser. */
+@font-face {
+  font-family: "Newsreader";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url("../fonts/newsreader-latin-opsz-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../fonts/hanken-grotesk-latin-wght-normal.woff2") format("woff2");
+}
+
 /* Palette: grigio e bianco come base, verde per le azioni e i dettagli,
-   nero pieno solo per i titoli. I font arrivano da Google Fonts (link in
-   templates/index.html). */
+   nero pieno solo per i titoli. */
 @theme {
   --font-serif: "Newsreader", ui-serif, Georgia, serif;
   --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
@@ -28,13 +44,20 @@
   --color-bosco-scuro: #173a29;
   --color-bosco-chiaro: #dbe9e0;
 
-  /* Linea verticale che collega i passi della home. Il ritardo di default
-     vale per il primo tratto; i successivi lo sovrascrivono in linea. */
+  /* Linea che collega i passi della home: verticale su mobile, orizzontale da
+     md in su. Il ritardo di default vale per il primo tratto; i successivi lo
+     sovrascrivono in linea. */
   --animate-traccia-v: traccia-v 600ms cubic-bezier(0.65, 0, 0.35, 1) 150ms both;
+  --animate-traccia-h: traccia-h 600ms cubic-bezier(0.65, 0, 0.35, 1) 150ms both;
 
   @keyframes traccia-v {
     from { transform: scaleY(0); }
     to { transform: scaleY(1); }
+  }
+
+  @keyframes traccia-h {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
   }
 }
 

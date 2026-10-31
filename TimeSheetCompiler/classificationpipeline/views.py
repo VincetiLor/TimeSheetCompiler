@@ -327,11 +327,6 @@ def event_compare(request, timesheet_id):
                 event_obj.category = found_category
                 event_obj.status = Event.Status.CLASSIFICATO
                 event_obj.save(update_fields=['category', 'status'])
-                print(
-                    f"[classificato] {event_obj.title} | "
-                    f"{event_obj.start_time:%d/%m %H:%M}-{event_obj.end_time:%H:%M} | "
-                    f"{found_category}"
-                )
 
     return redirect(page_url(
         'classificationpipeline:event_compare', timesheet, start, end))

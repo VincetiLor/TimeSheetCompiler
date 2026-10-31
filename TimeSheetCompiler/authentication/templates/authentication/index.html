@@ -13,61 +13,38 @@
     </p>
 </section>
 
+<section aria-labelledby="percorso" class="mt-16 sm:mt-24">
+    <h2 id="percorso" class="font-serif text-2xl text-inchiostro">Come si procede</h2>
 
-<div class="mt-16 grid items-start gap-16 sm:mt-24 md:grid-cols-2 md:gap-10">
+    <ol class="mt-6 grid md:grid-cols-3 md:gap-4">
+        <li class="relative flex gap-4 md:flex-col pb-4 md:pb-0">
+            <span aria-hidden="true" class="absolute top-10 bottom-0 left-5 w-px origin-top bg-bosco motion-safe:animate-traccia-v md:top-5 md:bottom-auto md:left-10 md:h-px md:w-[calc(100%-1.5rem)] md:origin-left motion-safe:md:animate-traccia-h"></span>
+            <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-bosco font-serif text-lg text-carta">1</span>
+            <a href="{% url 'settings' %}" class="group flex flex-1 flex-col rounded-md border border-linea bg-carta px-5 py-4 transition-colors hover:border-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                <h3 class="font-serif text-xl text-inchiostro group-hover:text-bosco-scuro">Regole di classificazione</h3>
+                <p class="mt-1">Configura le parole chiave che classificano gli eventi in automatico.</p>
+                <span class="mt-auto self-start pt-3 text-sm font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 group-hover:decoration-bosco">Imposta le regole</span>
+            </a>
+        </li>
 
-    <section aria-labelledby="percorso">
-        <h2 id="percorso" class="font-serif text-2xl text-inchiostro">Come si procede</h2>
+        <li class="relative flex gap-4 md:flex-col pb-4 md:pb-0">
+            <span aria-hidden="true" class="absolute top-10 bottom-0 left-5 w-px origin-top bg-bosco motion-safe:animate-traccia-v md:top-5 md:bottom-auto md:left-10 md:h-px md:w-[calc(100%-1.5rem)] md:origin-left motion-safe:md:animate-traccia-h motion-safe:[animation-delay:600ms]"></span>
+            <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-bosco font-serif text-lg text-carta">2</span>
+            <a href="{% url 'classificationpipeline:timesheet_list' %}" class="group flex flex-1 flex-col rounded-md border border-linea bg-carta px-5 py-4 transition-colors hover:border-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                <h3 class="font-serif text-xl text-inchiostro group-hover:text-bosco-scuro">Timesheet e calendari</h3>
+                <p class="mt-1">Apri o crea un timesheet, scegli il periodo e i Google Calendar da leggere.</p>
+                <span class="mt-auto self-start pt-3 text-sm font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 group-hover:decoration-bosco">Apri i timesheet</span>
+            </a>
+        </li>
 
-        <ol class="mt-6">
-            <li class="relative flex gap-4 pb-4">
-                <span aria-hidden="true" class="absolute top-10 bottom-0 left-5 w-px origin-top bg-bosco motion-safe:animate-traccia-v"></span>
-                <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-bosco font-serif text-lg text-carta">1</span>
-                <a href="{% url 'settings' %}" class="group flex flex-1 flex-col rounded-md border border-linea bg-carta px-5 py-4 transition-colors hover:border-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
-                    <h3 class="font-serif text-xl text-inchiostro group-hover:text-bosco-scuro">Regole di classificazione</h3>
-                    <p class="mt-1">Configura le parole chiave che classificano gli eventi in automatico.</p>
-                    <span class="mt-3 self-start text-sm font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 group-hover:decoration-bosco">Imposta le regole</span>
-                </a>
-            </li>
-
-            <li class="relative flex gap-4 pb-4">
-                <span aria-hidden="true" class="absolute top-10 bottom-0 left-5 w-px origin-top bg-bosco motion-safe:animate-traccia-v motion-safe:[animation-delay:600ms]"></span>
-                <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-bosco font-serif text-lg text-carta">2</span>
-                <a href="{% url 'classificationpipeline:timesheet_list' %}" class="group flex flex-1 flex-col rounded-md border border-linea bg-carta px-5 py-4 transition-colors hover:border-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
-                    <h3 class="font-serif text-xl text-inchiostro group-hover:text-bosco-scuro">Timesheet e calendari</h3>
-                    <p class="mt-1">Apri o crea un timesheet, scegli il periodo e i Google Calendar da leggere.</p>
-                    <span class="mt-3 self-start text-sm font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 group-hover:decoration-bosco">Apri i timesheet</span>
-                </a>
-            </li>
-
-            
-            <li class="relative flex gap-4">
-                <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-bosco font-serif text-lg text-carta">3</span>
-                <a href="{% url 'classificationpipeline:timesheet_list' %}" class="group flex flex-1 flex-col rounded-md border border-linea bg-carta px-5 py-4 transition-colors hover:border-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
-                    <h3 class="font-serif text-xl text-inchiostro group-hover:text-bosco-scuro">Compila il timesheet</h3>
-                    <p class="mt-1">Inserisce nel timesheet gli eventi classificati.</p>
-                    <span class="mt-3 self-start text-sm font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 group-hover:decoration-bosco">Compila</span>
-                </a>
-            </li>
-        </ol>
-    </section>
-
-    <section aria-labelledby="altro">
-        <h2 id="altro" class="font-serif text-2xl text-inchiostro">Altre funzioni</h2>
-
-        
-        <ul class="mt-6 space-y-4">
-            <li aria-disabled="true" class="flex flex-col rounded-md border border-dashed border-linea px-5 py-4">
-                <h3 class="font-serif text-xl text-inchiostro/60">Eventi del mese</h3>
-                <p class="mt-1">Gli eventi di questo mese e il loro stato.</p>
-                <span class="mt-3 self-start text-sm font-medium">Non ancora disponibile</span>
-            </li>
-            <li aria-disabled="true" class="flex flex-col rounded-md border border-dashed border-linea px-5 py-4">
-                <h3 class="font-serif text-xl text-inchiostro/60">Ultime compilazioni</h3>
-                <p class="mt-1">I timesheet già inviati e gli eventi che contenevano.</p>
-                <span class="mt-3 self-start text-sm font-medium">Non ancora disponibile</span>
-            </li>
-        </ul>
-    </section>
-</div>
+        <li class="relative flex gap-4 md:flex-col">
+            <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-bosco font-serif text-lg text-carta">3</span>
+            <a href="{% url 'classificationpipeline:timesheet_list' %}" class="group flex flex-1 flex-col rounded-md border border-linea bg-carta px-5 py-4 transition-colors hover:border-bosco focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">
+                <h3 class="font-serif text-xl text-inchiostro group-hover:text-bosco-scuro">Compila il timesheet</h3>
+                <p class="mt-1">Inserisce nel timesheet gli eventi classificati.</p>
+                <span class="mt-auto self-start pt-3 text-sm font-semibold text-bosco underline decoration-bosco-chiaro decoration-2 underline-offset-4 group-hover:decoration-bosco">Compila</span>
+            </a>
+        </li>
+    </ol>
+</section>
 {% endblock %}

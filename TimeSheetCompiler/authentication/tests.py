@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
+from allauth.socialaccount.adapter import get_adapter as get_social_adapter
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialToken
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
@@ -37,10 +38,10 @@ from hooks.models import Hook
 
 
 SHIB_HEADERS = {
-    'givenname': 'Mario',
-    'sn': 'Rossi',
-    'uid': '4242',
-    'affiliation': 'member@unimore.it;staff@unimore.it',
+    'x-shib-givenname': 'Mario',
+    'x-shib-sn': 'Rossi',
+    'x-shib-uid': '4242',
+    'x-shib-affiliation': 'member@unimore.it;staff@unimore.it',
 }
 
 
@@ -86,7 +87,7 @@ class ShibbolethMiddlewareTests(TestCase):
         self.client.get('/index/', headers=SHIB_HEADERS)
         self.client.logout()
 
-        self.client.get('/index/', headers={**SHIB_HEADERS, 'sn': 'Bianchi'})
+        self.client.get('/index/', headers={**SHIB_HEADERS, 'x-shib-sn': 'Bianchi'})
 
         docente = Docente.objects.get(id_unimore=4242)
         self.assertEqual(docente.cognome, 'Bianchi')
@@ -99,32 +100,81 @@ class ShibbolethMiddlewareTests(TestCase):
         self.assertEqual(Docente.objects.count(), 0)
 
     def test_partial_headers_provision_nothing(self):
-        response = self.client.get('/index/', headers={'uid': '4242'})
+        response = self.client.get('/index/', headers={'x-shib-uid': '4242'})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Docente.objects.count(), 0)
 
+    def test_unprefixed_headers_are_ignored(self):
+        """Traefik overwrites only the X-Shib-* names: a client can still send
+        uid or affiliation, and those must never identify anyone.
+        """
+        response = self.client.get('/index/', headers={
+            'givenname': 'Mario',
+            'sn': 'Rossi',
+            'uid': '4242',
+            'affiliation': 'staff@unimore.it',
+        })
+
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+        self.assertEqual(Docente.objects.count(), 0)
+
     def test_non_numeric_id_provisions_nothing_but_serves_request(self):
         response = self.client.get(
-            '/index/', headers={**SHIB_HEADERS, 'uid': 'not-a-number'})
+            '/index/', headers={**SHIB_HEADERS, 'x-shib-uid': 'not-a-number'})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Docente.objects.count(), 0)
         self.assertEqual(User.objects.count(), 0)
 
-    def test_already_authenticated_user_is_not_reprovisioned(self):
-        user = User.objects.create_user(username='local', password='pw')
-        self.client.force_login(user)
+    def test_same_person_keeps_the_session(self):
+        self.client.get('/index/', headers=SHIB_HEADERS)
+        session_key = self.client.session.session_key
 
         self.client.get('/index/', headers=SHIB_HEADERS)
 
-        self.assertEqual(Docente.objects.count(), 0)
-        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(self.client.session.session_key, session_key)
+
+    def test_second_person_on_the_same_browser_replaces_the_first(self):
+        self.client.get('/index/', headers=SHIB_HEADERS)
+
+        response = self.client.get(
+            '/index/', headers={**SHIB_HEADERS, 'x-shib-uid': '5555'})
+
+        self.assertEqual(response.wsgi_request.user.docente.id_unimore, 5555)
+
+    def test_second_person_with_a_refused_role_is_logged_out(self):
+        self.client.get('/index/', headers=SHIB_HEADERS)
+
+        response = self.client.get('/index/', headers={
+            **SHIB_HEADERS,
+            'x-shib-uid': '5555',
+            'x-shib-affiliation': 'student@unimore.it',
+        })
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+
+    def test_user_without_docente_is_replaced_by_the_shibboleth_one(self):
+        user = User.objects.create_user(username='local', password='pw')
+        self.client.force_login(user)
+
+        response = self.client.get('/index/', headers=SHIB_HEADERS)
+
+        self.assertEqual(response.wsgi_request.user.username, 'shib-4242')
+
+    def test_authenticated_user_without_headers_stays_logged_in(self):
+        user = User.objects.create_user(username='local', password='pw')
+        self.client.force_login(user)
+
+        response = self.client.get('/index/')
+
+        self.assertEqual(response.wsgi_request.user, user)
 
 
 STUDENT_HEADERS = {
     **SHIB_HEADERS,
-    'affiliation': 'member@unimore.it;student@unimore.it',
+    'x-shib-affiliation': 'member@unimore.it;student@unimore.it',
 }
 
 
@@ -152,8 +202,8 @@ class ShibbolethAffiliationTests(TestCase):
             self.client.logout()
             response = self.client.get('/index/', headers={
                 **SHIB_HEADERS,
-                'uid': str(uid),
-                'affiliation': f'member@unimore.it;{ruolo}@unimore.it',
+                'x-shib-uid': str(uid),
+                'x-shib-affiliation': f'member@unimore.it;{ruolo}@unimore.it',
             })
 
             self.assertEqual(response.status_code, 200, ruolo)
@@ -161,7 +211,7 @@ class ShibbolethAffiliationTests(TestCase):
 
     def test_role_match_is_case_insensitive(self):
         response = self.client.get(
-            '/index/', headers={**SHIB_HEADERS, 'affiliation': 'Staff@unimore.it'})
+            '/index/', headers={**SHIB_HEADERS, 'x-shib-affiliation': 'Staff@unimore.it'})
 
         self.assertEqual(response.status_code, 200)
 
@@ -173,7 +223,7 @@ class ShibbolethAffiliationTests(TestCase):
         self.assertTrue(Docente.objects.filter(id_unimore=4242).exists())
 
     def test_missing_affiliation_provisions_nothing(self):
-        headers = {k: v for k, v in SHIB_HEADERS.items() if k != 'affiliation'}
+        headers = {k: v for k, v in SHIB_HEADERS.items() if k != 'x-shib-affiliation'}
 
         response = self.client.get('/index/', headers=headers)
 
@@ -185,10 +235,10 @@ class ShibbolethAffiliationTests(TestCase):
 @override_settings(
     SHIBBOLETH_DEV_MODE=True,
     SHIBBOLETH_DEV_FAKE_HEADERS={
-        'HTTP_GIVENNAME': 'Dev',
-        'HTTP_SN': 'Tester',
-        'HTTP_UID': '1',
-        'HTTP_AFFILIATION': 'staff@unimore.it',
+        'HTTP_X_SHIB_GIVENNAME': 'Dev',
+        'HTTP_X_SHIB_SN': 'Tester',
+        'HTTP_X_SHIB_UID': '1',
+        'HTTP_X_SHIB_AFFILIATION': 'staff@unimore.it',
     },
 )
 class ShibbolethDevModeTests(TestCase):
@@ -213,16 +263,99 @@ class ShibbolethDevModeTests(TestCase):
         A partially-configured SP would silently log everyone in as the same
         dev identity. Pinned here so the merge order cannot change unnoticed.
         """
-        self.client.get('/index/', headers={'uid': '999'})
+        self.client.get('/index/', headers={'x-shib-uid': '999'})
 
         self.assertFalse(Docente.objects.filter(id_unimore=999).exists())
         self.assertTrue(Docente.objects.filter(id_unimore=1).exists())
+
+    def test_superuser_without_docente_keeps_the_admin_session(self):
+        user = User.objects.create_superuser(username='admin', password='pw')
+        self.client.force_login(user)
+
+        response = self.client.get('/index/')
+
+        self.assertEqual(response.wsgi_request.user, user)
 
     def test_complete_real_headers_win_over_dev_headers(self):
         self.client.get('/index/', headers=SHIB_HEADERS)
 
         self.assertTrue(Docente.objects.filter(id_unimore=4242).exists())
         self.assertFalse(Docente.objects.filter(id_unimore=1).exists())
+
+
+@override_settings(
+    SHIBBOLETH_DEV_MODE=False,
+    SHIBBOLETH_LOGOUT_URL='https://sp.example/Logout',
+)
+class LogoutTests(TestCase):
+
+    def setUp(self):
+        _create_google_app()
+        self.client.get('/index/', headers=SHIB_HEADERS)
+
+    def test_post_closes_the_django_session_and_goes_to_shibboleth(self):
+        response = self.client.post('/logout/')
+
+        self.assertRedirects(
+            response, 'https://sp.example/Logout', fetch_redirect_response=False)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_get_is_refused(self):
+        response = self.client.get('/logout/')
+
+        self.assertEqual(response.status_code, 405)
+        self.assertIn('_auth_user_id', self.client.session)
+
+
+@override_settings(SHIBBOLETH_DEV_MODE=False)
+class HomeTests(TestCase):
+
+    def setUp(self):
+        _create_google_app()
+
+    def test_root_redirects_to_home(self):
+        self.assertRedirects(self.client.get('/'), '/index/')
+
+    def test_header_shows_name_and_logout_button(self):
+        response = self.client.get('/index/', headers={
+            **SHIB_HEADERS,
+            'x-shib-givenname': 'MARIO',
+            'x-shib-sn': 'ROSSI',
+        })
+
+        self.assertContains(response, 'Mario Rossi')
+        self.assertContains(response, 'action="/logout/"')
+
+    def test_anonymous_header_has_no_logout_button(self):
+        response = self.client.get('/index/')
+
+        self.assertNotContains(response, 'action="/logout/"')
+
+    def test_home_shows_only_the_available_steps(self):
+        response = self.client.get('/index/')
+
+        self.assertContains(response, 'Regole di classificazione')
+        self.assertContains(response, 'Timesheet e calendari')
+        self.assertContains(response, 'Compila il timesheet')
+        self.assertNotContains(response, 'Non ancora disponibile')
+
+
+@override_settings(SHIBBOLETH_DEV_MODE=False)
+class ClosedSignupTests(TestCase):
+
+    def test_signup_page_creates_no_user(self):
+        self.client.post('/accounts/signup/', {
+            'username': 'intruder',
+            'password1': 'a-long-password-1',
+            'password2': 'a-long-password-1',
+        })
+
+        self.assertEqual(User.objects.count(), 0)
+
+    def test_google_signup_is_closed(self):
+        adapter = get_social_adapter()
+
+        self.assertFalse(adapter.is_open_for_signup(None, None))
 
 
 @override_settings(SHIBBOLETH_DEV_MODE=False)

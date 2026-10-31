@@ -5,16 +5,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block titolo %}Timesheet Compiler{% endblock %}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
     {% block css_extra %}{% endblock %}
 </head>
 <body class="min-h-screen bg-fondo font-sans text-grigio antialiased">
     <header class="border-b border-linea bg-carta">
-        <div class="mx-auto flex {% block larghezza_header %}max-w-5xl{% endblock %} items-center px-4 py-4 sm:px-8">
-            <a href="{% url 'index' %}" class="font-serif text-xl text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">Timesheet Compiler</a>
+        <div class="mx-auto flex {% block larghezza_header %}max-w-5xl{% endblock %} items-center justify-between gap-4 px-4 py-4 sm:px-8">
+            <a href="{% url 'index' %}" class="shrink-0 font-serif text-xl text-inchiostro focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-bosco">Timesheet Compiler</a>
+            {% if user.is_authenticated %}
+            <div class="flex min-w-0 items-center gap-4">
+                <span class="truncate text-sm">{{ user.docente.nome|title }} {{ user.docente.cognome|title }}</span>
+                <form method="post" action="{% url 'logout' %}" class="shrink-0">
+                    {% csrf_token %}
+                    <button type="submit" class="cursor-pointer rounded-md border border-linea px-3 py-1.5 text-sm font-medium text-bosco transition-colors hover:border-bosco hover:text-bosco-scuro focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bosco">Esci</button>
+                </form>
+            </div>
+            {% endif %}
         </div>
     </header>
 

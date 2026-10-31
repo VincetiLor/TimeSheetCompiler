@@ -6,5 +6,6 @@ from . import views
 # redirect verso Google resta sotto /auth/.
 urlpatterns = [
     path("index/", views.login_view, name="index"),
+    path("logout/", views.logout_view, name="logout"),
     path("auth/avvia-login-google/", views.avvia_login_google, name="avvia_login_google"),
 ]
