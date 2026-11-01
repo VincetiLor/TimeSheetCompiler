@@ -90,7 +90,7 @@ def open_period(driver, day):
 
 
 def save_page(driver):
-    # Comment out on the test pages (see open_diary)
+    # Replace with pass on the test pages (see open_diary)
     submit(driver, 'sbmDef')
 
 
@@ -191,7 +191,8 @@ def go_to_diary(driver):
 @sensitive_variables('credentials')
 def open_diary(driver, credentials):
     # To compile on a test page: comment out these two calls and the submit
-    # calls in open_period and save_page, uncomment the driver.get.
+    # in open_period, replace the one in save_page with pass, uncomment the
+    # driver.get. Local browser only: a remote one can't open the file.
     login(driver, credentials)
     go_to_diary(driver)
     # driver.get(Path(settings.BASE_DIR, settings.ESSE3_TEST_PAGE).as_uri())
