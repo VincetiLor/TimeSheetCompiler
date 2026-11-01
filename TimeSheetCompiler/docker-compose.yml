@@ -1,0 +1,70 @@
+# Development stack. It bypasses Traefik and publishes its port on the host:
+# http://<hostname>:DEV_PORT, no TLS and no Shibboleth.
+# Setup: cp .env.example .env, fill it in, docker compose up -d --build
+
+name: tsc-dev
+
+networks:
+  internal_net:
+    driver: bridge
+    internal: true      # Django <-> Postgres <-> Selenium, no way out
+  external_net:
+    driver: bridge      # Published port, Google, OpenAI, Esse3
+
+services:
+  tsc-dev:
+    build: .
+    container_name: tsc-dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DJANGO_ENV_FILE: .env
+      DJANGO_DEBUG: "True"
+      SHIBBOLETH_DEV_MODE: "True"
+      DB_HOST: tsc-dev-db
+      DB_PORT: "5432"
+      SELENIUM_BROWSER: chrome
+      SELENIUM_REMOTE_URL: http://tsc-dev-selenium:4444
+    volumes:
+      - .:/app
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver --nobrowser 0.0.0.0:8080"
+    ports:
+      - "${DEV_PORT:?set DEV_PORT in .env}:8080"
+    networks:
+      - internal_net
+      - external_net
+    depends_on:
+      tsc-dev-db:
+        condition: service_healthy
+
+  tsc-dev-db:
+    image: postgres:17.11
+    container_name: tsc-dev-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - tsc_dev_pg_data:/var/lib/postgresql/data
+    networks:
+      - internal_net    # Only this one: the database never leaves
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      retries: 10
+
+  tsc-dev-selenium:
+    image: selenium/standalone-chrome:155.0.8059.79-20261010
+    container_name: tsc-dev-selenium
+    restart: unless-stopped
+    shm_size: 2g
+    networks:
+      - internal_net
+      - external_net
+
+volumes:
+  tsc_dev_pg_data:

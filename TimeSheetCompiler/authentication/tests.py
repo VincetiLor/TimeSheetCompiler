@@ -21,6 +21,7 @@ from allauth.socialaccount.models import SocialAccount, SocialApp, SocialToken
 from cryptography.fernet import Fernet
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
+from django.core.management import CommandError, call_command
 from django.db.models.signals import post_save
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -408,6 +409,31 @@ class AvviaLoginGoogleTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, '/index/?next=/auth/avvia-login-google/')
+
+
+@mock.patch.dict('os.environ', {'GOOGLE_CLIENT_ID': 'id-1', 'GOOGLE_CLIENT_SECRET': 'secret-1'})
+class SetupSiteTests(TestCase):
+
+    def test_site_and_google_app_are_created(self):
+        call_command('setup_site', 'tsc.ing.unimore.it', stdout=mock.Mock())
+
+        site = Site.objects.get(pk=1)
+        app = SocialApp.objects.get(provider='google')
+        self.assertEqual(site.domain, 'tsc.ing.unimore.it')
+        self.assertEqual(app.client_id, 'id-1')
+        self.assertEqual(list(app.sites.all()), [site])
+
+    def test_running_it_twice_updates_the_same_app(self):
+        call_command('setup_site', 'tsc.ing.unimore.it', stdout=mock.Mock())
+        with mock.patch.dict('os.environ', {'GOOGLE_CLIENT_SECRET': 'secret-2'}):
+            call_command('setup_site', 'tsc.ing.unimore.it', stdout=mock.Mock())
+
+        self.assertEqual(SocialApp.objects.get(provider='google').secret, 'secret-2')
+
+    def test_missing_credentials_stop_the_command(self):
+        with mock.patch.dict('os.environ', {'GOOGLE_CLIENT_ID': ''}):
+            with self.assertRaises(CommandError):
+                call_command('setup_site', 'tsc.ing.unimore.it', stdout=mock.Mock())
 
 
 class TokenEncryptionTests(TestCase):

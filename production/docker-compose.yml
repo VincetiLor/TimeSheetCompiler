@@ -1,0 +1,81 @@
+# Production stack on services-host: Traefik terminates TLS and Shibboleth
+# sets the X-Shib-* headers. No port is published on the host.
+# Setup: cp .env.example .env, fill it in, docker compose up -d --build
+
+name: tsc
+
+services:
+  tsc:
+    build:
+      context: ../TimeSheetCompiler
+      dockerfile: Dockerfile
+    container_name: tsc
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DJANGO_ALLOWED_HOSTS: ${TSC_HOSTNAME:?set TSC_HOSTNAME in .env}
+      DB_HOST: tsc-db
+      DB_PORT: "5432"
+      POSTGRES_PASSWORD: ""   # Only init-db.sh needs it
+      SELENIUM_BROWSER: chrome
+      SELENIUM_REMOTE_URL: http://tsc-selenium:4444
+    command: >
+      sh -c "python manage.py migrate &&
+      python manage.py collectstatic --noinput &&
+      gunicorn mysite.wsgi:application --bind 0.0.0.0:8000
+      --workers 3 --timeout 600
+      --access-logfile - --error-logfile - --capture-output --log-level info"
+    networks:
+      - proxy-net      # Traefik in, Google, OpenAI out
+      - internal       # Postgres, Selenium
+    depends_on:
+      tsc-db:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy-net"
+      - "traefik.http.routers.tsc.rule=Host(`${TSC_HOSTNAME}`)"
+      - "traefik.http.routers.tsc.entrypoints=websecure"
+      - "traefik.http.routers.tsc.tls.certresolver=letsencrypt"
+      - "traefik.http.services.tsc.loadbalancer.server.port=8000"
+      - "traefik.http.routers.tsc.middlewares=shib-auth@file"
+
+  tsc-db:
+    image: postgres:17.11
+    container_name: tsc-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - tsc_pg_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    networks:
+      - internal       # Only this one
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$DB_USER -d $$DB_NAME"]
+      interval: 5s
+      retries: 10
+
+  tsc-selenium:
+    image: selenium/standalone-chrome:155.0.8059.79-20261010
+    container_name: tsc-selenium
+    restart: unless-stopped
+    shm_size: 2g
+    networks:
+      - internal
+      - selenium-out   # Not proxy-net: port 4444 has no password
+
+networks:
+  proxy-net:
+    external: true     # Already on the server
+  internal:
+    internal: true
+  selenium-out:
+    driver: bridge
+
+volumes:
+  tsc_pg_data:

@@ -256,6 +256,11 @@ SOCIALACCOUNT_STORE_TOKENS = True
 # teachers connect Google again.
 GOOGLE_TOKEN_KEY = os.environ['GOOGLE_TOKEN_KEY']
 
+# Sviluppo e produzione possono avere lo stesso hostname e i cookie ignorano la porta.
+if DEBUG:
+    SESSION_COOKIE_NAME = 'tsc_dev_sessionid'
+    CSRF_COOKIE_NAME = 'tsc_dev_csrftoken'
+
 # Solo in produzione: Traefik termina l'HTTPS e parla con l'app in HTTP.
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

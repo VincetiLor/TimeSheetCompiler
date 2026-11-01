@@ -17,5 +17,7 @@ dump.json
 TimeSheetCompiler/logs/
 # Output di collectstatic
 TimeSheetCompiler/staticfiles/
+# Backup del database
+production/backups/
 # Binario Tailwind CLI standalone (scaricato, non versionato)
 TimeSheetCompiler/bin/

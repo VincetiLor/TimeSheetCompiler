@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.git
+.venv
+bin/
+logs/
+staticfiles/
+__pycache__/
+*.pyc
+Dockerfile
+docker-compose.yml

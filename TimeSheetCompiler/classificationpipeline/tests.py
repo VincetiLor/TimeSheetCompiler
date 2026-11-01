@@ -16,6 +16,7 @@ from unittest import SkipTest, mock
 from zoneinfo import ZoneInfo
 
 import httplib2
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.db import IntegrityError, connections, transaction
@@ -2595,6 +2596,8 @@ class FillDiaryTests(TestCase):
     def setUpClass(cls):
         # Driver first: a SkipTest after super().setUpClass() would leave
         # the class transaction open
+        if settings.SELENIUM_REMOTE_URL:
+            raise SkipTest('A remote browser cannot open a file:// page')
         try:
             cls.driver = open_driver()
         except WebDriverException as error:
