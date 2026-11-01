@@ -10,8 +10,6 @@ su Linux x86-64.
 
 ## Avvio
 
-Il repository è privato: per clonarlo serve l'invito come collaboratore.
-
 ```bash
 git clone https://github.com/VincetiLor/TimeSheetCompiler.git
 cd TimeSheetCompiler/TimeSheetCompiler     # la cartella con manage.py
@@ -118,10 +116,10 @@ SELENIUM_HEADLESS=False
 SELENIUM_END_PAUSE=20
 ```
 
-Poi, dalla cartella con `manage.py`, con la stack Docker ferma:
+Poi, dalla cartella con `manage.py`
 
 ```bash
-./create_postgres_container.sh     # usa la stessa DB_PASSWORD di .env.dev
+./create_postgres_container.sh     # usa la stessa DB_PASSWORD che scrivi in .env.dev
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python manage.py migrate
