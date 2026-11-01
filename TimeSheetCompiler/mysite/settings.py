@@ -144,8 +144,8 @@ KEYWORD_SIMILARITY_THRESHOLD = float(os.environ.get('KEYWORD_SIMILARITY_THRESHOL
 SELENIUM_BROWSER = os.environ.get('SELENIUM_BROWSER', 'firefox')
 SELENIUM_REMOTE_URL = os.environ.get('SELENIUM_REMOTE_URL', '')
 SELENIUM_HEADLESS = os.environ.get('SELENIUM_HEADLESS', 'True') == 'True'
-# While the Esse3 login is commented out in open_diary, compiling opens this
-# saved diary page instead (path relative to BASE_DIR). Unused on the real Esse3.
+# Saved diary page (path relative to BASE_DIR). Unused on the real Esse3: see
+# open_diary for the lines to comment out when compiling on it.
 ESSE3_TEST_PAGE = os.environ.get('ESSE3_TEST_PAGE', '')
 # Seconds the browser stays open after compiling, to see what the bot did. 0 in production.
 SELENIUM_END_PAUSE = int(os.environ.get('SELENIUM_END_PAUSE', '0'))
@@ -251,6 +251,10 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 
 SOCIALACCOUNT_STORE_TOKENS = True
+
+# Fernet key for the Google tokens in the database. Losing it only means
+# teachers connect Google again.
+GOOGLE_TOKEN_KEY = os.environ['GOOGLE_TOKEN_KEY']
 
 # Solo in produzione: Traefik termina l'HTTPS e parla con l'app in HTTP.
 if not DEBUG:

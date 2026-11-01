@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 from allauth.socialaccount.adapter import get_adapter as get_social_adapter
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialToken
+from cryptography.fernet import Fernet
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 from django.db.models.signals import post_save
@@ -30,6 +31,8 @@ from googleapiclient.http import HttpMockSequence
 from authentication.models import Docente
 from authentication.services import (
     GoogleCredentialsError,
+    decrypt_token,
+    encrypt_token,
     get_credentials,
     list_calendars,
     list_events,
@@ -407,6 +410,57 @@ class AvviaLoginGoogleTests(TestCase):
         self.assertEqual(response.url, '/index/?next=/auth/avvia-login-google/')
 
 
+class TokenEncryptionTests(TestCase):
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='docente')
+        self.account = SocialAccount.objects.create(
+            user=self.user, provider='google', uid='uid-1')
+        self.token = SocialToken.objects.create(
+            app=_create_google_app(), account=self.account,
+            token='access-1', token_secret='refresh-1',
+            expires_at=timezone.now() + timedelta(hours=1))
+
+    def _raw_row(self):
+        return SocialToken.objects.filter(pk=self.token.pk).values('token', 'token_secret').get()
+
+    def test_the_database_never_holds_the_plain_tokens(self):
+        row = self._raw_row()
+
+        self.assertNotIn('access-1', row['token'])
+        self.assertNotIn('refresh-1', row['token_secret'])
+
+    def test_credentials_get_the_plain_tokens(self):
+        credentials = get_credentials(self.user)
+
+        self.assertEqual(credentials.token, 'access-1')
+        self.assertEqual(credentials.refresh_token, 'refresh-1')
+
+    def test_a_refresh_token_kept_by_allauth_is_not_encrypted_twice(self):
+        # allauth loads the row and replaces only the access token
+        token = SocialToken.objects.get(pk=self.token.pk)
+        token.token = 'access-2'
+        token.save()
+
+        row = self._raw_row()
+        self.assertEqual(decrypt_token(row['token']), 'access-2')
+        self.assertEqual(decrypt_token(row['token_secret']), 'refresh-1')
+
+    def test_an_empty_refresh_token_stays_empty(self):
+        self.assertEqual(encrypt_token(''), '')
+        self.assertEqual(decrypt_token(''), '')
+
+    def test_a_row_saved_before_encryption_still_works(self):
+        SocialToken.objects.filter(pk=self.token.pk).update(token='access-old', token_secret='refresh-old')
+
+        self.assertEqual(get_credentials(self.user).token, 'access-old')
+
+    def test_a_token_encrypted_with_another_key_sends_back_to_consent(self):
+        with override_settings(GOOGLE_TOKEN_KEY=Fernet.generate_key().decode()):
+            with self.assertRaises(GoogleCredentialsError):
+                get_credentials(self.user)
+
+
 class GetCredentialsTests(TestCase):
     """The refresh goes through google-auth for real: only the transport
     (authentication.services.Request) is replaced, so what is asserted is the
@@ -456,8 +510,8 @@ class GetCredentialsTests(TestCase):
 
         self.assertEqual(credentials.token, 'access-new')
         self.token.refresh_from_db()
-        self.assertEqual(self.token.token, 'access-new')
-        self.assertEqual(self.token.token_secret, 'refresh-1')
+        self.assertEqual(decrypt_token(self.token.token), 'access-new')
+        self.assertEqual(decrypt_token(self.token.token_secret), 'refresh-1')
         self.assertGreater(self.token.expires_at, timezone.now())
         sent = self._sent_form(transport)
         self.assertEqual(sent['refresh_token'], 'refresh-1')
@@ -489,7 +543,7 @@ class GetCredentialsTests(TestCase):
             get_credentials(self.user)
 
         self.token.refresh_from_db()
-        self.assertEqual(self.token.token, 'access-old')
+        self.assertEqual(decrypt_token(self.token.token), 'access-old')
 
     @mock.patch('authentication.services.Request')
     def test_expired_token_without_refresh_token_raises(self, mock_request_cls):

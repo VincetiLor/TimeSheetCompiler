@@ -3,6 +3,8 @@ from functools import partial
 
 import httplib2
 from allauth.socialaccount.models import SocialToken
+from cryptography.fernet import Fernet, InvalidToken
+from django.conf import settings
 from google.auth.exceptions import GoogleAuthError, RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -15,6 +17,9 @@ GOOGLE_TOKEN_URI = 'https://oauth2.googleapis.com/token'
 
 GOOGLE_REFRESH_TIMEOUT = (5, 10)
 GOOGLE_API_TIMEOUT = 10
+
+# Marks an encrypted value, so a token is never encrypted twice
+ENCRYPTED_PREFIX = 'fernet:'
 
 CALENDAR_LIST_FIELDS = 'nextPageToken,items(id,summary)'
 EVENTS_FIELDS = (
@@ -32,8 +37,25 @@ class GoogleCredentialsError(Exception):
     """
 
 
+def encrypt_token(value):
+    if not value or value.startswith(ENCRYPTED_PREFIX):
+        return value
+    encrypted = Fernet(settings.GOOGLE_TOKEN_KEY).encrypt(value.encode())
+    return ENCRYPTED_PREFIX + encrypted.decode()
+
+
+def decrypt_token(value):
+    if not value.startswith(ENCRYPTED_PREFIX):
+        return value
+    encrypted = value.removeprefix(ENCRYPTED_PREFIX)
+    try:
+        return Fernet(settings.GOOGLE_TOKEN_KEY).decrypt(encrypted.encode()).decode()
+    except InvalidToken as exc:
+        raise GoogleCredentialsError('Token Google non decifrabile') from exc
+
+
 def get_credentials(user):
-    
+
     token = (
         SocialToken.objects
         .filter(account__user=user, account__provider='google')
@@ -51,8 +73,8 @@ def get_credentials(user):
         expiry = expiry.astimezone(dt_timezone.utc).replace(tzinfo=None)
 
     credentials = Credentials(
-        token=token.token,
-        refresh_token=token.token_secret or None,
+        token=decrypt_token(token.token),
+        refresh_token=decrypt_token(token.token_secret) or None,
         token_uri=GOOGLE_TOKEN_URI,
         client_id=token.app.client_id,
         client_secret=token.app.secret,

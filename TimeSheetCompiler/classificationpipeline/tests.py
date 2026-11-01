@@ -2580,6 +2580,10 @@ def reload_page(driver):
     driver.get(DIARY_PAGE.as_uri())
 
 
+def open_test_page(driver, credentials):
+    driver.get(DIARY_PAGE.as_uri())
+
+
 @override_settings(SELENIUM_BROWSER='firefox', SELENIUM_REMOTE_URL='')
 class FillDiaryTests(TestCase):
     """fill_diary on the saved diary page (01/10-14/10/2026, editable up to
@@ -2716,12 +2720,10 @@ class WriteToEsse3Tests(TestCase):
 
 
 
-@override_settings(SELENIUM_BROWSER='firefox', SELENIUM_REMOTE_URL='',
-                   ESSE3_TEST_PAGE=str(DIARY_PAGE), SELENIUM_END_PAUSE=0)
+@override_settings(SELENIUM_BROWSER='firefox', SELENIUM_REMOTE_URL='', SELENIUM_END_PAUSE=0)
 class CompileOnTestPageTests(TestCase):
-    """The whole compilation, nothing patched, on the test page that stands in
-    for Esse3 while the login is commented out. On a file:// page Vai and Salva do not
-    submit, so the page keeps what was written.
+    """The whole compilation on the test page. Login, Vai and Salva are
+    replaced: this test must never reach the real Esse3.
     """
 
     def setUp(self):
@@ -2731,6 +2733,12 @@ class CompileOnTestPageTests(TestCase):
             self.skipTest(f'No browser for Selenium: {error.msg}')
         self.user, self.docente = make_docente()
         self.timesheet = make_timesheet(self.docente)
+        for name, side_effect in (('open_diary', open_test_page), ('open_period', None),
+                                  ('save_page', None)):
+            patcher = mock.patch(f'classificationpipeline.esse3_compilation.{name}',
+                                 side_effect=side_effect)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def test_the_events_of_the_page_are_compiled(self):
         cut = diary_event(self.timesheet, 'evt-1', datetime(2026, 10, 1, 9, 0, tzinfo=ROME),

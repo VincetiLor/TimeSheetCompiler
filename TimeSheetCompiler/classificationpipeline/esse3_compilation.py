@@ -85,14 +85,13 @@ def open_period(driver, day):
     field = driver.find_element(By.ID, 'diario_doc-inputSelData')
     field.clear()
     field.send_keys(f'{day:%d/%m/%Y}')
-    # Commented out on the test pages: their form still posts to Esse3
-    # submit(driver, 'btnVaiData')
+    # Comment out on the test pages (see open_diary)
+    submit(driver, 'btnVaiData')
 
 
 def save_page(driver):
-    # Commented out on the test pages: their form still posts to Esse3
-    # submit(driver, 'sbmDef')
-    pass
+    # Comment out on the test pages (see open_diary)
+    submit(driver, 'sbmDef')
 
 
 def read_page(driver, days=None):
@@ -191,8 +190,8 @@ def go_to_diary(driver):
 
 @sensitive_variables('credentials')
 def open_diary(driver, credentials):
-    # The real Esse3 is commented out until a teacher can try the login
-    # (todo, point 22): then uncomment the two calls and drop the test page.
-    # login(driver, credentials)
-    # go_to_diary(driver)
-    driver.get(Path(settings.BASE_DIR, settings.ESSE3_TEST_PAGE).as_uri())
+    # To compile on a test page: comment out these two calls and the submit
+    # calls in open_period and save_page, uncomment the driver.get.
+    login(driver, credentials)
+    go_to_diary(driver)
+    # driver.get(Path(settings.BASE_DIR, settings.ESSE3_TEST_PAGE).as_uri())
